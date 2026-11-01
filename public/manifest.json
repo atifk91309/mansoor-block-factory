@@ -1,0 +1,63 @@
+{
+  "id": "/",
+  "name": "Asad General Store - اسد جنرل سٹور",
+  "short_name": "Asad Store",
+  "description": "Asad General Store - Mobile accessories, manyari, cosmetics, general items, Khata, Udhar, profit tracking - Offline PWA",
+  "start_url": "/login?utm_source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#0f4fb8",
+  "categories": ["business", "shopping", "productivity"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/icon-circle-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-circle-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-circle-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Sale",
+      "url": "/dashboard/sales",
+      "description": "Quick sale - mobile accessories, cosmetics, manyari",
+      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Stock",
+      "url": "/dashboard/products",
+      "description": "View stock - mobile, manyari, cosmetics",
+      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Sales History",
+      "url": "/dashboard/sales/history",
+      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Khata / Udhar",
+      "url": "/dashboard/customers",
+      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+    }
+  ],
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+  "handle_links": "preferred"
+}
