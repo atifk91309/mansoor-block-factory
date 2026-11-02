@@ -26,6 +26,7 @@ BlockDailySchema.pre("validate", function() {
   if (this.blocksCount && this.ratePerBlock) {
     this.dailyWages = Math.round(this.blocksCount * this.ratePerBlock);
   }
+  if (!this.date) this.date = new Date();
 });
 
 BlockDailySchema.index({ userId: 1, date: -1 });

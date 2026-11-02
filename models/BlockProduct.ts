@@ -24,9 +24,9 @@ export interface IBlockProduct extends Document {
   localId?: string;
   createdAt: Date;
   updatedAt: Date;
-  totalBuyValue: number;
-  totalSellValue: number;
-  publishDateFormatted: string;
+  totalBuyValue?: number;
+  totalSellValue?: number;
+  publishDateFormatted?: string;
   stockHistory: StockHistoryItem[];
 }
 

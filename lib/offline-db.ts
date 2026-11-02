@@ -13,7 +13,7 @@ export interface OfflineBlockProduct {
   localId: string;
   _id?: string;
   name: string;
-  category: BlockCategory; // 6 categories - internal, not a page
+  category: BlockCategory;
   stock: number;
   stockMode: StockMode;
   buyPriceAvg: number;
@@ -73,6 +73,7 @@ export interface OfflineSale {
   createdAt: string;
   synced: number;
   items: OfflineSaleItem[];
+  // legacy fields for migration
   productId: string;
   productName: string;
   category: BlockCategory;
@@ -129,6 +130,11 @@ export class OfflineDB extends Dexie {
 
   get products(): Table<OfflineBlockProduct, string> {
     return this.blockProducts;
+  }
+
+  // For BackupRestore component
+  get allTableNames(): string[] {
+    return this.tables.map(t => t.name);
   }
 
   constructor() {
@@ -250,7 +256,6 @@ export class OfflineDB extends Dexie {
       categories: null,
     });
 
-    // v9 - final, ensure no leftover
     this.version(9).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
       sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",

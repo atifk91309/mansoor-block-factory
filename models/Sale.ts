@@ -79,6 +79,9 @@ SaleSchema.index({ userId: 1, "items.category": 1 }); // fast filter: block, rai
 SaleSchema.index({ localId: 1 }, { sparse: true });
 
 SaleSchema.pre("validate", function(){
+  if (!this.invoiceNo) {
+    this.invoiceNo = `MOHAL-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+  }
   this.totalQuantity = this.items.reduce((sum, i) => sum + (i.quantity || 0), 0);
   this.totalBuy = Math.round(this.items.reduce((sum, i) => sum + (i.buyPrice * i.quantity), 0));
   this.totalSell = Math.round(this.items.reduce((sum, i) => sum + (i.sellPrice * i.quantity), 0));
