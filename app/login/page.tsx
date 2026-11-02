@@ -98,7 +98,7 @@ function LoginContent() {
           <h1 className="mt-3 text-[20px] font-bold tracking-tight text-gray-900 leading-tight">
             🧱 MOHAL Block Factory
           </h1>
-          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">منصور بلاک فیکٹری - محال</p>
+          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">منصور بلاک فیکٹری - محل</p>
           <p className="text-[12px] font-medium text-gray-600 mt-0.5">Blocks • Crush • Rait • Cement • Shewa Road</p>
           <p className="text-[11px] text-gray-400 mt-1">Daily Production • Sales • Stock • Profit • Khata • Offline</p>
         </div>

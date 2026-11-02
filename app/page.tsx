@@ -80,7 +80,7 @@ export default function HomePage() {
             <br />
             <span className="text-[#0f4fb8]">Factory - MOHAL</span>
           </h1>
-          <p className="text-gray-600 text-[13px] mt-2 font-bold">منصور بلاک فیکٹری - محال</p>
+          <p className="text-gray-600 text-[13px] mt-2 font-bold">منصور بلاک فیکٹری - محل</p>
           <p className="text-gray-500 text-[12px] mt-1 font-medium">Blocks • Crush • Rait • Cement • Shewa</p>
           <p className="text-gray-400 text-[11px] mt-1">Daily Production • Fast billing • Stock • Profit • Udhar Khata • Offline-ready</p>
 
