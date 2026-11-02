@@ -137,20 +137,33 @@ export default function MansoorBlockDashboard() {
         </div>
       )}
 
-      <h1 className="text-[20px] font-bold">🧱 Mansoor Block Factory - Ismaila</h1>
+      <h1 className="text-[20px] font-bold">🧱 Mansoor Block Factory - Shewa Road</h1>
       <p className="text-[11px] text-gray-500 mb-4">{new Date().toLocaleDateString()} • {isOffline ? "Offline Mode" : "Online"} • Factory Reports</p>
 
+      {/* ✅ ROW 1 - SALES: Today, Month, Yearly, All */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
         <div className="bg-white p-4 rounded-xl border"><p className="text-[10px] text-gray-400">Today Sale (Blocks + Crush)</p><p className="text-[18px] font-bold">Rs.{fmt(reports?.today.total || 0)}</p><p className="text-[10px] text-green-600">Profit Rs.{fmt(reports?.today.profit || 0)} • {reports?.today.count || 0} bills • {reports?.today.blockCount || 0} pcs</p></div>
         <div className="bg-white p-4 rounded-xl border"><p className="text-[10px] text-gray-400">This Month Sale</p><p className="text-[18px] font-bold">Rs.{fmt(reports?.month.total || 0)}</p><p className="text-[10px] text-blue-600">Profit Rs.{fmt(reports?.month.profit || 0)} • {reports?.month.count || 0} bills</p></div>
-        <div className="bg-white p-4 rounded-xl border-2 border-blue-200"><p className="text-[10px] text-blue-600 font-bold">Production Today</p><p className="text-[18px] font-bold">{reports?.production.today.totalBlocks || 0} Blocks</p><p className="text-[10px] text-gray-500">{reports?.production.today.totalCement || 0} Bori Cement • Wages Rs.{fmt(reports?.production.today.totalWages || 0)}</p></div>
+        {/* ✅ NEW - YEARLY SALE */}
+        <div className="p-4 rounded-xl border-2 border-purple-200 bg-purple-50/50"><p className="text-[10px] text-purple-700 font-bold">Yearly Sale (Blocks + Crush)</p><p className="text-[18px] font-bold text-purple-700">Rs.{fmt(reports?.year.total || 0)}</p><p className="text-[10px] text-purple-600">Profit Rs.{fmt(reports?.year.profit || 0)} • {reports?.year.count || 0} bills • {reports?.year.blockCount || 0} pcs</p></div>
         <div className="bg-white p-4 rounded-xl border border-yellow-300"><p className="text-[10px] text-gray-500 font-bold">Stock Value (6 Categories)</p><p className="text-[18px] font-bold">Rs.{fmt(stockBuy)}</p><p className="text-[10px] text-gray-600">Sell Rs.{fmt(stockSell)} • Profit Rs.{fmt(stockSell - stockBuy)}</p></div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
-        <div className="bg-green-50 border border-green-200 p-4 rounded-xl"><p className="text-[10px] text-green-700 font-bold">Month Production Value</p><p className="text-[18px] font-bold text-green-700">Rs.{fmt((reports?.production.month.totalBlocks || 0) * 5)}</p><p className="text-[10px]">{reports?.production.month.totalBlocks || 0} Blocks • Cost Rs.{fmt(reports?.production.month.totalCement || 0)}</p></div>
-        <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl"><p className="text-[10px] text-orange-700 font-bold">Total Udhar</p><p className="text-[18px] font-bold">Rs.{fmt(reports?.khata.totalUdhar || 0)}</p><p className="text-[10px]">{reports?.khata.customers || 0} customers • Ismaila, Marghuz</p></div>
+      {/* ✅ ROW 2 - PRODUCTION: Today, Month, Yearly, All */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
+        <div className="bg-white p-4 rounded-xl border-2 border-blue-200"><p className="text-[10px] text-blue-600 font-bold">Production Today</p><p className="text-[18px] font-bold">{reports?.production.today.totalBlocks || 0} Blocks</p><p className="text-[10px] text-gray-500">{reports?.production.today.totalCement || 0} Bori Cement • Wages Rs.{fmt(reports?.production.today.totalWages || 0)}</p></div>
         <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl"><p className="text-[10px] text-blue-700 font-bold">Month Production</p><p className="text-[18px] font-bold">{reports?.production.month.totalBlocks || 0} Blocks</p><p className="text-[10px]">{reports?.production.month.totalCement || 0} Bori • {reports?.production.month.count || 0} days</p></div>
+        {/* ✅ NEW - YEARLY PRODUCTION = your 78 Bori / 8386 Blocks */}
+        <div className="bg-indigo-50 border-indigo-200 p-4 rounded-xl border-2"><p className="text-[10px] text-indigo-700 font-bold">Yearly Production</p><p className="text-[18px] font-bold text-indigo-700">{reports?.production.all.totalBlocks || 0} Blocks</p><p className="text-[10px] text-indigo-600">{reports?.production.all.totalCement || 0} Bori • {reports?.production.all.count || 0} entries • Wages Rs.{fmt(reports?.production.all.totalWages || 0)}</p></div>
+        <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl"><p className="text-[10px] text-orange-700 font-bold">Total Udhar</p><p className="text-[18px] font-bold">Rs.{fmt(reports?.khata.totalUdhar || 0)}</p><p className="text-[10px]">{reports?.khata.customers || 0} customers • Shewa, Marghuz</p></div>
+      </div>
+
+      {/* ✅ ROW 3 - VALUES + LOW STOCK */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
+        <div className="bg-green-50 border border-green-200 p-4 rounded-xl"><p className="text-[10px] text-green-700 font-bold">Month Production Value</p><p className="text-[18px] font-bold text-green-700">Rs.{fmt((reports?.production.month.totalBlocks || 0) * 5)}</p><p className="text-[10px]">{reports?.production.month.totalBlocks || 0} Blocks • Cost Rs.{fmt(reports?.production.month.totalCement || 0)} Bori</p></div>
+        {/* ✅ NEW - YEARLY PRODUCTION VALUE */}
+        <div className="bg-green-100 border border-green-300 p-4 rounded-xl"><p className="text-[10px] text-green-800 font-bold">Yearly Production Value</p><p className="text-[18px] font-bold text-green-800">Rs.{fmt((reports?.production.all.totalBlocks || 0) * 52)}</p><p className="text-[10px]">{reports?.production.all.totalBlocks || 0} Blocks • Cost Rs.52/block</p></div>
+        <div className="bg-white p-4 rounded-xl border"><p className="text-[10px] text-gray-400">All Time Sale</p><p className="text-[18px] font-bold">Rs.{fmt(reports?.all.total || 0)}</p><p className="text-[10px] text-gray-500">Profit Rs.{fmt(reports?.all.profit || 0)} • {reports?.all.count || 0} bills</p></div>
         <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-xl"><p className="text-[10px] text-yellow-800 font-bold">Low Stock Blocks (≤10)</p><p className="text-[18px] font-bold">{reports?.stock.lowCount || 0} Items</p><p className="text-[10px]">Blocks, Crush, Rait low</p></div>
       </div>
 
@@ -165,7 +178,7 @@ export default function MansoorBlockDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="bg-white border rounded-xl overflow-hidden">
           <div className="p-3 border-b flex justify-between"><b className="text-[13px]">Today Recent Sales - Blocks + Crush</b><span className="text-[10px] bg-green-100 px-2 py-0.5 rounded-full">{recentSales.length} today</span></div>
-          {recentSales.length === 0 ? <p className="p-4 text-[11px] text-gray-400 text-center">No sales today — Ismaila factory</p> : recentSales.map((s, i) => (
+          {recentSales.length === 0 ? <p className="p-4 text-[11px] text-gray-400 text-center">No sales today — Shewa Road factory</p> : recentSales.map((s, i) => (
             <div key={i} className="p-2 border-b flex justify-between text-[11px]">
               <span><b>{s.invoiceNo}</b> • {s.customerName} • {s.items?.[0]?.productName || "Blocks"} x{s.totalQuantity} <span className="text-[9px] text-gray-500">{new Date(s.createdAt).toLocaleTimeString()}</span></span>
               <span className="font-bold">Rs.{fmt(s.totalSell)}</span>

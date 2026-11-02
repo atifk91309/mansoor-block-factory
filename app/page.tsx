@@ -55,8 +55,8 @@ export default function HomePage() {
     <div className="min-h-dvh bg-gray-50 flex flex-col">
       <div className="bg-white border-b px-3 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2">
-          <Image src="/logo.png" alt="Asad General Store" width={28} height={28} className="w-7 h-7 rounded-full border bg-white" />
-          <h1 className="font-bold text-[14px]">🛒 Asad General Store</h1>
+          <Image src="/icon-circle-512.png" alt="Mansoor Block Factory" width={28} height={28} className="w-7 h-7 rounded-full border bg-white" />
+          <h1 className="font-bold text-[14px]">🧱 MOHAL - Mansoor Block</h1>
         </div>
         <div className="flex gap-2">
           {!isInstalled && (
@@ -73,22 +73,22 @@ export default function HomePage() {
       <div className="flex-1 p-3 sm:p-8 max-w-6xl mx-auto w-full flex flex-col justify-center">
         <div className="text-center mb-5">
           <div className="flex justify-center mb-3">
-            <Image src="/logo.png" alt="Asad General Store" width={80} height={80} className="w-20 h-20 rounded-full border-2 border-[#0f4fb8] shadow-sm bg-white" priority />
+            <Image src="/icon-circle-512.png" alt="Mansoor Block Factory - Mohal" width={80} height={80} className="w-20 h-20 rounded-full border-2 border-[#0f4fb8] shadow-sm bg-white" priority />
           </div>
           <h1 className="text-[22px] sm:text-4xl font-bold leading-tight">
-            Asad General
+            Mansoor Block
             <br />
-            <span className="text-[#0f4fb8]">Store</span>
+            <span className="text-[#0f4fb8]">Factory - MOHAL</span>
           </h1>
-          <p className="text-gray-600 text-[12px] mt-2 font-bold">اسد جنرل سٹور</p>
-          <p className="text-gray-500 text-[12px] mt-1 font-medium">Mobile Accessories • Manyari • Cosmetics</p>
-          <p className="text-gray-400 text-[11px] mt-1">Fast billing • Stock • Profit • Udhar Khata • Offline-ready</p>
+          <p className="text-gray-600 text-[13px] mt-2 font-bold">منصور بلاک فیکٹری - محال</p>
+          <p className="text-gray-500 text-[12px] mt-1 font-medium">Blocks • Crush • Rait • Cement • Shewa</p>
+          <p className="text-gray-400 text-[11px] mt-1">Daily Production • Fast billing • Stock • Profit • Udhar Khata • Offline-ready</p>
 
           {!isInstalled && (
             <div className="mt-4 bg-[#0f4fb8] text-white p-3 rounded-xl flex justify-between items-center text-left max-w-sm mx-auto">
               <div>
-                <p className="font-bold text-[12px]">📲 Install Asad Store App</p>
-                <p className="text-[10px] text-blue-100">Works offline • Fast billing</p>
+                <p className="font-bold text-[12px]">📲 Install MOHAL Block App</p>
+                <p className="text-[10px] text-blue-100">Works offline • Daily prod • 78 Bori tracking</p>
               </div>
               <button type="button" onClick={handleInstall} className="bg-white text-[#0f4fb8] px-3.5 py-1.5 rounded-lg font-bold text-[11px] ml-2 shrink-0">
                 Install
@@ -100,21 +100,36 @@ export default function HomePage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-5">
           <Link href="/dashboard" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
             <p className="font-bold text-[13px] mt-1">📊 Dashboard</p>
-            <p className="text-[11px] text-gray-400 mt-1">Today sale, profit, low stock</p>
+            <p className="text-[11px] text-gray-400 mt-1">Today sale, yearly sale, production 78 Bori</p>
           </Link>
           <Link href="/dashboard/sales" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
-            <p className="font-bold text-[13px] mt-1">🛒 Sale Point</p>
-            <p className="text-[11px] text-gray-400 mt-1">Mobile, cosmetics, manyari fast sell</p>
+            <p className="font-bold text-[13px] mt-1">🧱 Block Sale</p>
+            <p className="text-[11px] text-gray-400 mt-1">Blocks, Crush, Rait fast POS sell</p>
           </Link>
-          <Link href="/dashboard/products" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
+          <Link href="/dashboard/block-products" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
             <p className="font-bold text-[13px] mt-1">📦 Stock</p>
-            <p className="text-[11px] text-gray-400 mt-1">All items • Qty • Price</p>
+            <p className="text-[11px] text-gray-400 mt-1">All blocks • Cement • Qty • Price</p>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-5">
+          <Link href="/dashboard/block-daily" className="bg-blue-50 border border-blue-200 p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
+            <p className="font-bold text-[13px] mt-1">🏗️ Daily Production</p>
+            <p className="text-[11px] text-gray-500 mt-1">Cement Bori, Blocks Count, Wages</p>
+          </Link>
+          <Link href="/dashboard/customers" className="bg-orange-50 border border-orange-200 p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
+            <p className="font-bold text-[13px] mt-1">📒 Khata / Udhar</p>
+            <p className="text-[11px] text-gray-500 mt-1">Customers - Shewa, Marghuz</p>
+          </Link>
+          <Link href="/dashboard/sales/history" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
+            <p className="font-bold text-[13px] mt-1">📜 History</p>
+            <p className="text-[11px] text-gray-400 mt-1">Yearly sale & production reports</p>
           </Link>
         </div>
       </div>
 
       <div className="text-center pb-4 text-[10px] text-gray-400">
-        Asad General Store © {new Date().getFullYear()} • اسد جنرل سٹور • Offline V1
+        Mansoor Block Factory - MOHAL © {new Date().getFullYear()} • منصور بلاک فیکٹری • Offline V2 • Shewa
       </div>
     </div>
   );

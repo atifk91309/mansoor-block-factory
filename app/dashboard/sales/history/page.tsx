@@ -192,7 +192,7 @@ export default function SalesHistoryPage() {
         <div>
           <Link href="/dashboard/sales" className="text-[11px] text-gray-500">← POS</Link>
           <h1 className="text-[17px] font-bold">🧱 Mansoor Sales History</h1>
-          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} bills • Rs.{total.toLocaleString()} • Profit Rs.{profit.toLocaleString()} • Ismaila</p>
+          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} bills • Rs.{total.toLocaleString()} • Profit Rs.{profit.toLocaleString()} • Shewa Road</p>
         </div>
         <Link href="/dashboard/sales" className="bg-black text-white px-4 py-2 rounded-xl text-[12px] h-fit">+ New Block Sale</Link>
       </div>
@@ -216,7 +216,7 @@ export default function SalesHistoryPage() {
       ) : (
         <div className="space-y-3">
           {Object.keys(grouped).length === 0 ? (
-            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">No sales — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""} • Ismaila Factory</p>
+            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">No sales — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""} • Shewa Road Factory</p>
           ) : (
             Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).map(([date, daySales]) => {
               const dt = daySales.reduce((a, b) => a + b.totalSell, 0);

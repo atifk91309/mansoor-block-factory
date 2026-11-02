@@ -286,7 +286,7 @@ export default function BlockProductsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="p-2 sm:p-4 space-y-3 max-w-6xl mx-auto">
-        <h1 className="text-[13px] sm:text-[16px] font-bold px-1">Block Products - 6 Categories Stock - Ismaila</h1>
+        <h1 className="text-[13px] sm:text-[16px] font-bold px-1">Block Products - 6 Categories Stock - Shewa Road</h1>
 
         <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 px-1 scrollbar-hide">
           {categories.map((c) => (

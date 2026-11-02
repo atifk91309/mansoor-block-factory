@@ -80,7 +80,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         <div className="md:hidden h-14 shrink-0" />
         <div className="mb-6">
           <h2 className="font-bold text-[16px]">🧱 Mansoor Block</h2>
-          <p className="text-[10px] text-zinc-400">Factory • Ismaila • Swabi • Blocks • Rait • Bajri</p>
+          <p className="text-[10px] text-zinc-400">Factory • Shewa Road • Swabi • Blocks • Rait • Bajri</p>
         </div>
 
         {pendingCount > 0 && (
@@ -122,7 +122,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             🚪 Logout
           </button>
           <div className="mt-3 text-[10px] text-zinc-500 text-center">
-            {isOnline ? "🟢 Online" : "🟡 Offline"} • Mansoor Block • Ismaila
+            {isOnline ? "🟢 Online" : "🟡 Offline"} • Mansoor Block • Shewa Road
           </div>
         </div>
       </aside>

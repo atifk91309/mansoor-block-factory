@@ -17,31 +17,36 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Asad General Store - Mobile Accessories, Manyari, Cosmetics",
-    template: "%s | Asad General Store",
+    default: "Mansoor Block Factory - MOHAL - Blocks, Crush, Rait - Shewa",
+    template: "%s | MOHAL Block Factory",
   },
   description:
-    "Asad General Store - Mobile accessories, manyari, cosmetics, general items. Fast billing, stock, profit, Udhar Khata, Wusool, Easypaisa. Offline-ready PWA.",
-  applicationName: "Asad General Store",
+    "Mansoor Block Factory - Mohal - Blocks, Crush, Rait, Cement. Daily Production, Sales, Stock, Profit, Udhar Khata, Yearly Reports. Offline-ready PWA - Shewa, Swabi.",
+  applicationName: "MOHAL - Mansoor Block Factory",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Asad Store",
+    title: "MOHAL Blocks",
   },
   icons: {
     icon: [
-      { url: "/logo.png", sizes: "32x32", type: "image/png" },
-      { url: "/logo.png", sizes: "16x16", type: "image/png" },
-      { url: "/icon-circle-180.png", sizes: "180x180", type: "image/png" },
       { url: "/icon-circle-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-180.png", sizes: "180x180", type: "image/png" },
+      { url: "/icon-circle-180.png", sizes: "180x180", type: "image/png" },
+      { url: "/logo.png", sizes: "32x32", type: "image/png" },
     ],
-    apple: [{ url: "/icon-circle-180.png", sizes: "180x180", type: "image/png" }],
-    shortcut: ["/icon-circle-180.png"],
+    apple: [
+      { url: "/icon-180.png", sizes: "180x180", type: "image/png" },
+      { url: "/icon-circle-180.png", sizes: "180x180", type: "image/png" },
+    ],
+    shortcut: ["/icon-circle-512.png"],
   },
   openGraph: {
-    title: "Asad General Store - اسد جنرل سٹور",
-    description: "Mobile Accessories • Manyari • Cosmetics • Offline Ready",
+    title: "Mansoor Block Factory - منصور بلاک فیکٹری - MOHAL - Shewa",
+    description: "Blocks • Crush • Rait • Cement • Daily Production 78 Bori • Yearly 8386 Blocks • Offline Ready",
     type: "website",
     images: ["/icon-circle-512.png"],
   },

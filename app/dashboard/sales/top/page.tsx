@@ -32,7 +32,7 @@ export default function TopPage() {
     <div className="p-2 sm:p-4 max-w-4xl mx-auto min-h-screen bg-gray-50">
       <div className="flex justify-between items-center mb-3">
         <div>
-          <h1 className="font-bold text-[16px] sm:text-[18px]">🔥 Mansoor Top Selling - Ismaila</h1>
+          <h1 className="font-bold text-[16px] sm:text-[18px]">🔥 Mansoor Top Selling - Shewa</h1>
           <p className="text-[10px] text-gray-500 capitalize">{filter} • {category} • {top.length} items • Factory</p>
         </div>
         <Link href="/dashboard/sales" className="text-[10px] bg-white border px-3 py-1.5 rounded-full font-bold">← POS</Link>
@@ -54,7 +54,7 @@ export default function TopPage() {
       {loading ? (
         <p className="text-[11px] text-center py-10">Loading top blocks...</p>
       ) : top.length === 0 ? (
-        <div className="bg-white border rounded-xl p-8 text-center"><p className="text-[12px] text-gray-400">No sales {filter} {category} • Ismaila Factory</p></div>
+        <div className="bg-white border rounded-xl p-8 text-center"><p className="text-[12px] text-gray-400">No sales {filter} {category} • Shewa Factory</p></div>
       ) : (
         <>
           <div className="grid gap-2 sm:hidden">

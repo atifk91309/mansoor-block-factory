@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Asad General Store - اسد جنرل سٹور",
-  "short_name": "Asad Store",
-  "description": "Asad General Store - Mobile accessories, manyari, cosmetics, general items, Khata, Udhar, profit tracking - Offline PWA",
+  "name": "Mansoor Block Factory - منصور بلاک فیکٹری - MOHAL",
+  "short_name": "MOHAL Blocks",
+  "description": "Mansoor Block Factory - Mohal - Blocks, Crush, Rait, Cement, Daily Production, Sales, Khata, Udhar, Profit tracking - Offline PWA - Ismaila, Swabi",
   "start_url": "/login?utm_source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -10,12 +10,24 @@
   "orientation": "any",
   "background_color": "#ffffff",
   "theme_color": "#0f4fb8",
-  "categories": ["business", "shopping", "productivity"],
+  "categories": ["business", "productivity"],
   "lang": "en",
   "icons": [
     {
+      "src": "/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "/icon-circle-180.png",
       "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
@@ -30,30 +42,44 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
     {
-      "name": "New Sale",
+      "name": "🧱 POS Sale",
       "url": "/dashboard/sales",
-      "description": "Quick sale - mobile accessories, cosmetics, manyari",
-      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+      "description": "Quick Block Sale - Blocks, Crush, Rait",
+      "icons": [{ "src": "/icon-circle-512.png", "sizes": "512x512" }]
     },
     {
-      "name": "Stock",
-      "url": "/dashboard/products",
-      "description": "View stock - mobile, manyari, cosmetics",
-      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+      "name": "📦 Stock",
+      "url": "/dashboard/block-products",
+      "description": "View stock - Blocks, Crush, Rait, Cement",
+      "icons": [{ "src": "/icon-circle-512.png", "sizes": "512x512" }]
     },
     {
-      "name": "Sales History",
-      "url": "/dashboard/sales/history",
-      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+      "name": "🏗️ Daily Prod",
+      "url": "/dashboard/block-daily",
+      "description": "Daily Production - Cement Bori, Blocks Count",
+      "icons": [{ "src": "/icon-circle-512.png", "sizes": "512x512" }]
     },
     {
-      "name": "Khata / Udhar",
+      "name": "📒 Khata / Udhar",
       "url": "/dashboard/customers",
-      "icons": [{ "src": "/icon-circle-180.png", "sizes": "180x180" }]
+      "description": "Customer Khata - Ismaila, Marghuz",
+      "icons": [{ "src": "/icon-circle-512.png", "sizes": "512x512" }]
+    },
+    {
+      "name": "📜 Sales History",
+      "url": "/dashboard/sales/history",
+      "description": "All sales history - Blocks + Crush",
+      "icons": [{ "src": "/icon-circle-512.png", "sizes": "512x512" }]
     }
   ],
   "launch_handler": {

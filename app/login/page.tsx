@@ -18,11 +18,10 @@ function LoginContent() {
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
 
   useEffect(() => {
-    // Load offline data only on client — fixes hydration
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEmail(getOfflineUser()?.email || "");
     setOfflineUser(getOfflineUser());
-    setIsOffline(typeof window!== "undefined"?!window.navigator.onLine : false);
+    setIsOffline(typeof window !== "undefined" ? !window.navigator.onLine : false);
 
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
@@ -39,7 +38,7 @@ function LoginContent() {
     setError("");
     setLoading(true);
 
-    if (typeof window!== "undefined" &&!window.navigator.onLine) {
+    if (typeof window !== "undefined" && !window.navigator.onLine) {
       const cached = getOfflineUser();
       if (cached && cached.email.toLowerCase() === email.trim().toLowerCase()) {
         localStorage.setItem("offline_mode", "true");
@@ -78,7 +77,7 @@ function LoginContent() {
             }
           }
         } catch {}
-        if (typeof window!== "undefined") localStorage.removeItem("offline_mode");
+        if (typeof window !== "undefined") localStorage.removeItem("offline_mode");
         router.push(callbackUrl);
         router.refresh();
       }
@@ -94,19 +93,19 @@ function LoginContent() {
       <div className="w-full max-w-90">
         <div className="text-center mb-6">
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-white border-2 border-[#0f4fb8] shadow-md overflow-hidden">
-            <Image src="/logo.png" alt="Asad General Store" width={56} height={56} className="h-12 w-12 object-contain" priority />
+            <Image src="/icon-circle-512.png" alt="Mansoor Block Factory - MOHAL" width={56} height={56} className="h-12 w-12 object-contain" priority />
           </div>
           <h1 className="mt-3 text-[20px] font-bold tracking-tight text-gray-900 leading-tight">
-            🛒 Asad General Store
+            🧱 MOHAL Block Factory
           </h1>
-          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">اسد جنرل سٹور</p>
-          <p className="text-[12px] font-medium text-gray-600 mt-0.5">Mobile Accessories • Manyari • Cosmetics</p>
-          <p className="text-[11px] text-gray-400 mt-1">Offline billing • Khata • Stock • Profit</p>
+          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">منصور بلاک فیکٹری - محال</p>
+          <p className="text-[12px] font-medium text-gray-600 mt-0.5">Blocks • Crush • Rait • Cement • Shewa Road</p>
+          <p className="text-[11px] text-gray-400 mt-1">Daily Production • Sales • Stock • Profit • Khata • Offline</p>
         </div>
 
         {isOffline && (
           <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 text-[12px] p-3 rounded-xl text-center font-medium">
-            📶 You are offline {offlineUser? `- Welcome back ${offlineUser.name}` : "- Connect once first"}
+            📶 You are offline {offlineUser ? `- Welcome back ${offlineUser.name}` : "- Connect once first"}
           </div>
         )}
 
@@ -114,11 +113,11 @@ function LoginContent() {
           <div className="space-y-3">
             <div>
               <label className="text-[11px] font-semibold tracking-widest text-gray-500 uppercase ml-1">Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="asad@store.com" type="email" required autoComplete="email" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition" />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="mansoor@block.com" type="email" required autoComplete="email" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition" />
             </div>
             <div>
               <label className="text-[11px] font-semibold tracking-widest text-gray-500 uppercase ml-1">Password</label>
-              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" required disabled={isOffline &&!!offlineUser} autoComplete="current-password" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition disabled:bg-gray-100" />
+              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" required disabled={isOffline && !!offlineUser} autoComplete="current-password" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition disabled:bg-gray-100" />
               {isOffline && offlineUser && <p className="text-[10px] text-gray-400 mt-1 ml-1">Offline login - password not needed</p>}
             </div>
           </div>
@@ -126,10 +125,10 @@ function LoginContent() {
           {error && <div className="bg-red-50 border border-red-100 text-red-600 text-[13px] p-3 rounded-xl text-center font-medium">{error}</div>}
 
           <button type="submit" disabled={loading} className="w-full bg-[#0f4fb8] hover:bg-[#0d3f99] text-white p-3.5 rounded-xl font-bold text-[14px] disabled:opacity-60 active:scale-[0.98] transition shadow-[0_6px_20px_rgba(15,79,184,0.3)]">
-            {loading? "Logging in..." : isOffline? "Login Offline" : "Login to Asad Store"}
+            {loading ? "Logging in..." : isOffline ? "Login Offline - MOHAL" : "Login to MOHAL Blocks"}
           </button>
 
-          <p className="text-center text-[11px] text-gray-400 pt-1">{isOffline? "Offline mode • 1 year cache" : "Secure • Asad Store • اسد جنرل سٹور • Works offline"}</p>
+          <p className="text-center text-[11px] text-gray-400 pt-1">{isOffline ? "Offline mode • 1 year cache • 8386 Blocks" : "Secure • MOHAL Blocks • منصور بلاک فیکٹری • Works offline • Shewa Road"}</p>
         </form>
       </div>
     </div>

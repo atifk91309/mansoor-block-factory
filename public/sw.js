@@ -1,11 +1,14 @@
-const CACHE = 'asad-store-v1'; // was medicine-v3
+const CACHE = 'mohal-block-v2'; // was asad-store-v1
 
 const PRECACHE = [
   '/offline',
   '/manifest.json',
   '/logo.png',
+  '/icon-180.png',
   '/icon-circle-180.png',
+  '/icon-192.png',
   '/icon-circle-512.png',
+  '/icon-512.png',
   '/',
   '/login'
 ];
@@ -13,7 +16,9 @@ const PRECACHE = [
 const OPTIONAL_PRECACHE = [
   '/dashboard',
   '/dashboard/sales',
-  '/dashboard/products',
+  '/dashboard/block-products',
+  '/dashboard/block-daily',
+  '/dashboard/customers',
   '/dashboard/sales/history'
 ];
 
@@ -49,7 +54,7 @@ self.addEventListener('activate', (e) => {
       .then((keys) => Promise.all(
         keys
           .filter((k) => k !== CACHE)
-          .filter((k) => k.startsWith('medicine-') || k.startsWith('al-farooq-') || k.includes('sona') || k.includes('agri-pwa') || k.startsWith('agri-') || k.startsWith('yasir-'))
+          .filter((k) => k.startsWith('asad-') || k.startsWith('medicine-') || k.startsWith('al-farooq-') || k.includes('sona') || k.includes('agri-pwa') || k.startsWith('agri-') || k.startsWith('yasir-') || k.startsWith('asad-store-'))
           .map((k) => {
             console.log('Deleting old cache:', k);
             return caches.delete(k);
@@ -90,7 +95,7 @@ self.addEventListener('fetch', (e) => {
                  (await cache.match('/login')) ||
                  (await cache.match('/')) ||
                  new Response(
-                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/logo.png" style="width:80px;height:80px;border-radius:50%"/><h1>Asad General Store</h1><p>اسد جنرل سٹور - Offline</p><p>Mobile Accessories • Manyari • Cosmetics billing available offline</p></body></html>`,
+                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/icon-circle-512.png" style="width:80px;height:80px;border-radius:50%"/><h1>منصور بلاک فیکٹری - MOHAL</h1><p>Mansoor Block Factory - Mohal - Offline</p><p>Blocks • Crush • Rait • Cement • Daily Production billing available offline • Ismaila</p></body></html>`,
                    { headers: { 'Content-Type': 'text/html' } }
                  );
         })
@@ -108,6 +113,7 @@ self.addEventListener('fetch', (e) => {
             url.pathname.includes('_next/static') ||
             url.pathname === '/logo.png' ||
             url.pathname === '/manifest.json' ||
+            url.pathname.includes('icon-') ||
             url.pathname.includes('icon-circle') ||
             req.destination === 'style' ||
             req.destination === 'script'
@@ -117,7 +123,7 @@ self.addEventListener('fetch', (e) => {
           }
           return res;
         })
-        .catch(() => caches.match('/logo.png') || new Response('', { status: 503 }));
+        .catch(() => caches.match('/icon-circle-512.png') || caches.match('/logo.png') || new Response('', { status: 503 }));
     })
   );
 });
