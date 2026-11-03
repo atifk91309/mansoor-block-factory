@@ -9,6 +9,9 @@ export type WusoolHistoryEntry = { amount: number; date: string; note?: string }
 export type WusoolSyncPayload = { amount: number; note?: string; date: string; customerLocalId?: string };
 export type StockHistoryEntry = { qty: number; date: string; buyPrice: number; sellPrice: number };
 
+export type BillEntry = { label: string; amount: number };
+export type MixMaterialEntry = { label: string; qty: string };
+
 export interface OfflineBlockProduct {
   localId: string;
   _id?: string;
@@ -54,6 +57,11 @@ export interface OfflineBlockDaily {
   userId: string;
   synced: number;
   createdAt: string;
+  bills: BillEntry[];
+  mixMaterials: MixMaterialEntry[];
+  totalBill: number;
+  costPerBlock: number;
+  isMonthlyElectricity: boolean;
 }
 
 export interface OfflineSale {
@@ -73,7 +81,6 @@ export interface OfflineSale {
   createdAt: string;
   synced: number;
   items: OfflineSaleItem[];
-  // legacy fields for migration
   productId: string;
   productName: string;
   category: BlockCategory;
@@ -108,11 +115,27 @@ export interface OfflineCustomer {
   userId?: string;
 }
 
-export type OfflinePayload = OfflineBlockProduct | OfflineSale | OfflineCustomer | WusoolSyncPayload | OfflineBlockDaily;
+export interface MonthlyExpenseLocal {
+  month: string;
+  _id?: string;
+  electricity: number;
+  rent: number;
+  other: number;
+  totalMonthly: number;
+  totalBlocks: number;
+  totalDailyBill: number;
+  costPerBlock: number;
+  grandCostPerBlock: number;
+  synced: number;
+  createdAt: string;
+  userId?: string;
+}
+
+export type OfflinePayload = OfflineBlockProduct | OfflineSale | OfflineCustomer | WusoolSyncPayload | OfflineBlockDaily | MonthlyExpenseLocal;
 
 export interface SyncQueueItem {
   id?: number;
-  type: "sale" | "product" | "customer" | "wusool" | "blockDaily";
+  type: "sale" | "product" | "customer" | "wusool" | "blockDaily" | "monthlyExpense";
   localId: string;
   payload: OfflinePayload;
   createdAt: Date;
@@ -126,16 +149,11 @@ export class OfflineDB extends Dexie {
   sales!: Table<OfflineSale, string>;
   customers!: Table<OfflineCustomer, string>;
   blockDaily!: Table<OfflineBlockDaily, string>;
+  monthlyExpenses!: Table<MonthlyExpenseLocal, string>;
   syncQueue!: Table<SyncQueueItem, number>;
 
-  get products(): Table<OfflineBlockProduct, string> {
-    return this.blockProducts;
-  }
-
-  // For BackupRestore component
-  get allTableNames(): string[] {
-    return this.tables.map(t => t.name);
-  }
+  get products(): Table<OfflineBlockProduct, string> { return this.blockProducts; }
+  get allTableNames(): string[] { return this.tables.map(t => t.name); }
 
   constructor() {
     super("MansoorBlockFactoryOfflineV1");
@@ -239,9 +257,7 @@ export class OfflineDB extends Dexie {
         }
         if (d["blocksCount"] === undefined) {
           d["blocksCount"] = rnd(Number(d["blocksMade"]) || 0) || 0;
-          if (typeof d["blocksMade"] === "number") {
-            d["blocksMade"] = "6 inch Block";
-          }
+          if (typeof d["blocksMade"] === "number") d["blocksMade"] = "6 inch Block";
         }
       });
     });
@@ -264,6 +280,56 @@ export class OfflineDB extends Dexie {
       syncQueue: "++id, type, localId, createdAt",
       blockTypes: null,
       categories: null,
+    });
+
+    this.version(10).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      blockTypes: null,
+      categories: null,
+    }).upgrade(async (tx) => {
+      const dailyTable = tx.table("blockDaily");
+      await dailyTable.toCollection().modify((d: Record<string, unknown>) => {
+        if (!d["bills"]) d["bills"] = [];
+        if (!d["mixMaterials"]) d["mixMaterials"] = [];
+        if (d["totalBill"] === undefined) d["totalBill"] = d["dailyWages"] || 0;
+        if (d["costPerBlock"] === undefined) d["costPerBlock"] = 0;
+        if (d["isMonthlyElectricity"] === undefined) d["isMonthlyElectricity"] = false;
+      });
+    });
+
+    this.version(11).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      blockTypes: null,
+      categories: null,
+    });
+
+    // V12 FIX - force re-create monthlyExpenses index + clean pending sync
+    this.version(12).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      blockTypes: null,
+      categories: null,
+    }).upgrade(async (tx) => {
+      const meTable = tx.table("monthlyExpenses");
+      await meTable.toCollection().modify((m: Record<string, unknown>) => {
+        if (m["synced"] === undefined) m["synced"] = 0;
+        if (m["totalMonthly"] === undefined) {
+          m["totalMonthly"] = rnd(Number(m["electricity"]) || 0) + rnd(Number(m["rent"]) || 0) + rnd(Number(m["other"]) || 0);
+        }
+      });
     });
   }
 }

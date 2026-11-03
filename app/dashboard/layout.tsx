@@ -6,7 +6,7 @@ import { SessionProvider, signOut } from "next-auth/react";
 import { offlineDB } from "@/lib/offline-db";
 import { clearOfflineUser } from "@/lib/offline-auth";
 
-function useIsOnline() {
+function useIsOnline(): boolean {
   const sub = useCallback((cb: () => void) => {
     window.addEventListener("online", cb);
     window.addEventListener("offline", cb);
@@ -18,13 +18,13 @@ function useIsOnline() {
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [open, setOpen] = useState<boolean>(false);
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const isOnline = useIsOnline();
   const pathname = usePathname();
 
   const isActive = useCallback(
-    (href: string) => {
+    (href: string): boolean => {
       if (href === "/dashboard") return pathname === "/dashboard";
       return pathname.startsWith(href);
     },
@@ -103,6 +103,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <div className="mt-3 mb-1 text-[10px] text-zinc-500 font-bold tracking-widest pl-2">FACTORY</div>
           <Link href="/dashboard/block-daily" onClick={() => setOpen(false)} className={linkClass("/dashboard/block-daily")}>
             🏗️ Daily Production
+          </Link>
+          <Link href="/dashboard/monthly-expenses" onClick={() => setOpen(false)} className={linkClass("/dashboard/monthly-expenses")}>
+            💡 Monthly Expenses / ماہانہ خرچ
           </Link>
 
           <div className="mt-3 mb-1 text-[10px] text-zinc-500 font-bold tracking-widest pl-2">KHATA</div>

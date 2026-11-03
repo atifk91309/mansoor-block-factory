@@ -40,7 +40,7 @@ export default function HomePage() {
 
   const handleInstall = useCallback(async () => {
     if (!deferredPrompt) {
-      window.alert("Chrome Menu ⋮ → Add to Home screen / Install app");
+      window.alert("To install: Chrome Menu ⋮ → Install app\n iPhone: Share → Add to Home Screen");
       return;
     }
     await deferredPrompt.prompt();
@@ -88,7 +88,7 @@ export default function HomePage() {
             <div className="mt-4 bg-[#0f4fb8] text-white p-3 rounded-xl flex justify-between items-center text-left max-w-sm mx-auto">
               <div>
                 <p className="font-bold text-[12px]">📲 Install MOHAL Block App</p>
-                <p className="text-[10px] text-blue-100">Works offline • Daily prod • 78 Bori tracking</p>
+                <p className="text-[10px] text-blue-100">Works offline • Daily prod • 78 Bori tracking • No Play Store needed</p>
               </div>
               <button type="button" onClick={handleInstall} className="bg-white text-[#0f4fb8] px-3.5 py-1.5 rounded-lg font-bold text-[11px] ml-2 shrink-0">
                 Install
@@ -129,7 +129,7 @@ export default function HomePage() {
       </div>
 
       <div className="text-center pb-4 text-[10px] text-gray-400">
-        Mansoor Block Factory - MOHAL © {new Date().getFullYear()} • منصور بلاک فیکٹری • Offline V2 • Shewa
+        Mansoor Block Factory - MOHAL © {new Date().getFullYear()} • منصور بلاک فیکٹری • Offline V3 • Ismaila, Swabi • No Play Protect Warning
       </div>
     </div>
   );

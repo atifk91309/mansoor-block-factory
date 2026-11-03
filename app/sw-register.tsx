@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 
-const CURRENT_CACHE = "mohal-block-v2";
+const CURRENT_CACHE = "mohal-block-v3";
 
 export default function SWRegister() {
   useEffect(() => {
@@ -13,7 +13,6 @@ export default function SWRegister() {
         await Promise.all(
           keys
             .filter((k) => k !== CURRENT_CACHE)
-            .filter((k) => k.startsWith("al-farooq-") || k.startsWith("yasir-") || k.startsWith("medicine-") || k.startsWith("asad-") || k.startsWith("asad-store-") || k.includes("sona-shop") || k.includes("agri-pwa"))
             .map((k) => caches.delete(k))
         );
       } catch {}
@@ -32,16 +31,16 @@ export default function SWRegister() {
 
     const onLoad = () => {
       navigator.serviceWorker
-        .register("/sw.js?v=mohal-v2", { scope: "/" })
+        .register("/sw.js?v=mohal-v3", { scope: "/" })
         .then((reg) => {
-          console.log("SW MOHAL Block Factory v2:", reg.scope);
+          console.log("SW MOHAL Block Factory v3:", reg.scope);
 
           reg.addEventListener("updatefound", () => {
             const nw = reg.installing;
             if (!nw) return;
             nw.addEventListener("statechange", () => {
               if (nw.state === "installed" && navigator.serviceWorker.controller) {
-                console.log("New MOHAL SW ready - reloading");
+                console.log("New MOHAL SW v3 ready - reloading");
                 window.location.reload();
               }
             });

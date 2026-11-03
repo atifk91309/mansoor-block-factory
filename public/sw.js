@@ -1,16 +1,14 @@
-const CACHE = 'mohal-block-v2'; // was asad-store-v1
+const CACHE = 'mohal-block-v3';
 
 const PRECACHE = [
+  '/',
+  '/login',
   '/offline',
   '/manifest.json',
   '/logo.png',
-  '/icon-180.png',
   '/icon-circle-180.png',
-  '/icon-192.png',
-  '/icon-circle-512.png',
-  '/icon-512.png',
-  '/',
-  '/login'
+  '/icon-circle-192.png',
+  '/icon-circle-512.png'
 ];
 
 const OPTIONAL_PRECACHE = [
@@ -54,7 +52,6 @@ self.addEventListener('activate', (e) => {
       .then((keys) => Promise.all(
         keys
           .filter((k) => k !== CACHE)
-          .filter((k) => k.startsWith('asad-') || k.startsWith('medicine-') || k.startsWith('al-farooq-') || k.includes('sona') || k.includes('agri-pwa') || k.startsWith('agri-') || k.startsWith('yasir-') || k.startsWith('asad-store-'))
           .map((k) => {
             console.log('Deleting old cache:', k);
             return caches.delete(k);
@@ -95,7 +92,7 @@ self.addEventListener('fetch', (e) => {
                  (await cache.match('/login')) ||
                  (await cache.match('/')) ||
                  new Response(
-                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/icon-circle-512.png" style="width:80px;height:80px;border-radius:50%"/><h1>منصور بلاک فیکٹری - MOHAL</h1><p>Mansoor Block Factory - Mohal - Offline</p><p>Blocks • Crush • Rait • Cement • Daily Production billing available offline • Ismaila</p></body></html>`,
+                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/icon-circle-512.png" style="width:80px;height:80px;border-radius:50%"/><h1>منصور بلاک فیکٹری - MOHAL</h1><p>Mansoor Block Factory - Mohal - Offline</p><p>Blocks • Crush • Rait • Cement • Daily Production billing available offline • Ismaila, Swabi</p><a href="/login" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#0f4fb8;color:#fff;border-radius:8px;text-decoration:none">Login</a></body></html>`,
                    { headers: { 'Content-Type': 'text/html' } }
                  );
         })
@@ -111,10 +108,9 @@ self.addEventListener('fetch', (e) => {
           if (!res.ok) return res;
           if (
             url.pathname.includes('_next/static') ||
+            url.pathname.includes('icon-circle') ||
             url.pathname === '/logo.png' ||
             url.pathname === '/manifest.json' ||
-            url.pathname.includes('icon-') ||
-            url.pathname.includes('icon-circle') ||
             req.destination === 'style' ||
             req.destination === 'script'
           ) {
