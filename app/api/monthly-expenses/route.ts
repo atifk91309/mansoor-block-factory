@@ -15,6 +15,7 @@ type MonthlyBody = {
   totalMonthly?: number;
   totalBlocks?: number;
   totalDailyBill?: number;
+  totalMixCost?: number;
   costPerBlock?: number;
   grandCostPerBlock?: number;
   userId?: string;
@@ -52,12 +53,13 @@ export async function POST(req: NextRequest) {
   const userId = session?.user?.id || body.userId;
   if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
 
-  // Explicit calc - double safety with your new model hook
   const electricity = rnd(body.electricity || 0);
   const rent = rnd(body.rent || 0);
   const other = rnd(body.other || 0);
   const totalBlocks = rnd(body.totalBlocks || 0);
   const totalDailyBill = rnd(body.totalDailyBill || 0);
+  const totalMixCost = rnd(body.totalMixCost || 0);
+  
   const totalMonthly = electricity + rent + other;
   const costPerBlock = totalBlocks > 0 ? Number((totalMonthly / totalBlocks).toFixed(2)) : 0;
   const grandCostPerBlock = totalBlocks > 0 ? Number(((totalDailyBill + totalMonthly) / totalBlocks).toFixed(2)) : 0;
@@ -73,6 +75,7 @@ export async function POST(req: NextRequest) {
       totalMonthly,
       totalBlocks,
       totalDailyBill,
+      totalMixCost,
       costPerBlock,
       grandCostPerBlock,
     },

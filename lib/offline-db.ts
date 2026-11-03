@@ -4,13 +4,52 @@ export type BlockCategory = "khaka" | "crush" | "bajri" | "rait" | "block" | "ce
 export type PaymentType = "cash" | "udhar" | "jazzcash" | "easypaisa" | "bank";
 export type SyncStatus = 0 | 1;
 export type StockMode = "limited" | "unlimited";
+export type TrolleyStatus = "OPEN" | "CLOSED";
 
 export type WusoolHistoryEntry = { amount: number; date: string; note?: string };
 export type WusoolSyncPayload = { amount: number; note?: string; date: string; customerLocalId?: string };
 export type StockHistoryEntry = { qty: number; date: string; buyPrice: number; sellPrice: number };
 
 export type BillEntry = { label: string; amount: number };
-export type MixMaterialEntry = { label: string; qty: string };
+export type MixMaterialEntry = { 
+  label: string; 
+  qty: string;
+  rairi: number;
+  rate: number;
+  amount: number;
+  trolleyEntryId?: string;
+};
+
+export interface OfflineTrolleyEntry {
+  localId: string;
+  _id?: string;
+  date: string;
+  material: string;
+  normalizedMaterial: string;
+  rairiInTrolley: number;
+  actualRairi?: number;
+  trolleyPrice: number;
+  perRairiRate: number;
+  status: TrolleyStatus;
+  totalUsed: number;
+  userId: string;
+  synced: number;
+  createdAt: string;
+}
+
+export interface OfflineTrolleyStock {
+  localId: string;
+  _id?: string;
+  material: string;
+  normalizedMaterial: string;
+  totalRairi: number;
+  totalCost: number;
+  avgRate: number;
+  userId: string;
+  synced: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface OfflineBlockProduct {
   localId: string;
@@ -60,6 +99,7 @@ export interface OfflineBlockDaily {
   bills: BillEntry[];
   mixMaterials: MixMaterialEntry[];
   totalBill: number;
+  mixCost: number;
   costPerBlock: number;
   isMonthlyElectricity: boolean;
 }
@@ -124,6 +164,7 @@ export interface MonthlyExpenseLocal {
   totalMonthly: number;
   totalBlocks: number;
   totalDailyBill: number;
+  totalMixCost: number;
   costPerBlock: number;
   grandCostPerBlock: number;
   synced: number;
@@ -131,11 +172,11 @@ export interface MonthlyExpenseLocal {
   userId?: string;
 }
 
-export type OfflinePayload = OfflineBlockProduct | OfflineSale | OfflineCustomer | WusoolSyncPayload | OfflineBlockDaily | MonthlyExpenseLocal;
+export type OfflinePayload = OfflineBlockProduct | OfflineSale | OfflineCustomer | WusoolSyncPayload | OfflineBlockDaily | MonthlyExpenseLocal | OfflineTrolleyEntry | OfflineTrolleyStock;
 
 export interface SyncQueueItem {
   id?: number;
-  type: "sale" | "product" | "customer" | "wusool" | "blockDaily" | "monthlyExpense";
+  type: "sale" | "product" | "customer" | "wusool" | "blockDaily" | "monthlyExpense" | "trolleyEntry" | "trolleyClose";
   localId: string;
   payload: OfflinePayload;
   createdAt: Date;
@@ -151,6 +192,8 @@ export class OfflineDB extends Dexie {
   blockDaily!: Table<OfflineBlockDaily, string>;
   monthlyExpenses!: Table<MonthlyExpenseLocal, string>;
   syncQueue!: Table<SyncQueueItem, number>;
+  trolleyEntries!: Table<OfflineTrolleyEntry, string>;
+  trolleyStock!: Table<OfflineTrolleyStock, string>;
 
   get products(): Table<OfflineBlockProduct, string> { return this.blockProducts; }
   get allTableNames(): string[] { return this.tables.map(t => t.name); }
@@ -312,7 +355,6 @@ export class OfflineDB extends Dexie {
       categories: null,
     });
 
-    // V12 FIX - force re-create monthlyExpenses index + clean pending sync
     this.version(12).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
       sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
@@ -329,6 +371,75 @@ export class OfflineDB extends Dexie {
         if (m["totalMonthly"] === undefined) {
           m["totalMonthly"] = rnd(Number(m["electricity"]) || 0) + rnd(Number(m["rent"]) || 0) + rnd(Number(m["other"]) || 0);
         }
+        if (m["totalMixCost"] === undefined) m["totalMixCost"] = 0;
+      });
+    });
+
+    this.version(13).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
+      blockTypes: null,
+      categories: null,
+    }).upgrade(async (tx) => {
+      const dailyTable = tx.table("blockDaily");
+      await dailyTable.toCollection().modify((d: Record<string, unknown>) => {
+        const mix = d["mixMaterials"] as Array<Record<string, unknown>> | undefined;
+        if (mix) {
+          d["mixMaterials"] = mix.map((m) => {
+            if (m["rairi"] === undefined) {
+              const qtyStr = (m["qty"] as string) || "";
+              const num = parseInt(qtyStr.replace(/[^0-9]/g, "") || "0", 10);
+              return {
+                label: m["label"] || "Material",
+                qty: qtyStr,
+                rairi: isNaN(num) ? 0 : num,
+                rate: 0,
+                amount: 0,
+                trolleyEntryId: "",
+              };
+            }
+            if (m["amount"] === undefined) {
+              m["amount"] = rnd(Number(m["rairi"]) || 0) * rnd(Number(m["rate"]) || 0);
+            }
+            return m;
+          });
+        }
+        if (d["mixCost"] === undefined) {
+          const materials = d["mixMaterials"] as Array<{ amount?: number }> || [];
+          d["mixCost"] = materials.reduce((s, m) => s + rnd(m.amount || 0), 0);
+        }
+      });
+    });
+
+    // V14 - FIX totalUsed + ensure trolley tables fully indexed for auto-deduct
+    this.version(14).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date, totalUsed",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt, updatedAt",
+      blockTypes: null,
+      categories: null,
+    }).upgrade(async (tx) => {
+      const trolleyEntries = tx.table("trolleyEntries");
+      await trolleyEntries.toCollection().modify((t: Record<string, unknown>) => {
+        if (t["totalUsed"] === undefined) t["totalUsed"] = 0;
+        if (t["status"] === undefined) t["status"] = "OPEN";
+        if (t["synced"] === undefined) t["synced"] = 0;
+      });
+      const trolleyStock = tx.table("trolleyStock");
+      await trolleyStock.toCollection().modify((s: Record<string, unknown>) => {
+        if (s["synced"] === undefined) s["synced"] = 0;
+        if (s["totalRairi"] === undefined) s["totalRairi"] = rnd(Number(s["rairiInTrolley"]) || 0);
       });
     });
   }

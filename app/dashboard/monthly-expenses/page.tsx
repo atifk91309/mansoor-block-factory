@@ -9,6 +9,7 @@ type MonthlyRecord = {
   month: string;
   totalBlocks: number;
   totalDailyBill: number;
+  totalMixCost: number;
   totalBags: number;
   daysWorked: number;
 };
@@ -18,6 +19,7 @@ type BlockDailyDoc = {
   blocksCount: number;
   totalBill?: number;
   dailyWages?: number;
+  mixCost?: number;
   cementBags?: number;
 };
 
@@ -50,10 +52,11 @@ export default function MonthlyExpensePage() {
         ? list.map(d => ({ 
             date: new Date(d.date).toISOString().split("T")[0], 
             blocksCount: d.blocksCount, 
-            totalBill: d.totalBill || d.dailyWages || 0, 
+            totalBill: d.totalBill || d.dailyWages || 0,
+            mixCost: d.mixCost || 0,
             cementBags: d.cementBags || 0 
           }))
-        : offline.map(d => ({ date: d.date, blocksCount: d.blocksCount, totalBill: d.totalBill || d.dailyWages || 0, cementBags: d.cementBags }));
+        : offline.map(d => ({ date: d.date, blocksCount: d.blocksCount, totalBill: d.totalBill || d.dailyWages || 0, mixCost: d.mixCost || 0, cementBags: d.cementBags }));
 
       const filtered = source.filter(d => d.date.startsWith(month));
       const finalFiltered = filtered.length === 0 && source.length > 0 ? source.slice(0,30) : filtered;
@@ -61,7 +64,8 @@ export default function MonthlyExpensePage() {
       setRecord({ 
         month, 
         totalBlocks: finalFiltered.reduce((s,r)=>s+r.blocksCount,0), 
-        totalDailyBill: finalFiltered.reduce((s,r)=>s+(r.totalBill||0),0), 
+        totalDailyBill: finalFiltered.reduce((s,r)=>s+(r.totalBill||0),0),
+        totalMixCost: finalFiltered.reduce((s,r)=>s+(r.mixCost||0),0),
         totalBags: finalFiltered.reduce((s,r)=>s+(r.cementBags||0),0), 
         daysWorked: finalFiltered.length 
       });
@@ -90,7 +94,7 @@ export default function MonthlyExpensePage() {
             j.data.forEach((s) => {
               const existing = mergedMap.get(s.month);
               if (existing) {
-                mergedMap.set(s.month, { ...existing, synced: 1, _id: s._id || existing._id, totalMonthly: s.totalMonthly || existing.totalMonthly, costPerBlock: s.costPerBlock || existing.costPerBlock, grandCostPerBlock: s.grandCostPerBlock || existing.grandCostPerBlock });
+                mergedMap.set(s.month, { ...existing, synced: 1, _id: s._id || existing._id, totalMonthly: s.totalMonthly || existing.totalMonthly, totalMixCost: s.totalMixCost || existing.totalMixCost, costPerBlock: s.costPerBlock || existing.costPerBlock, grandCostPerBlock: s.grandCostPerBlock || existing.grandCostPerBlock });
               } else {
                 mergedMap.set(s.month, {
                   month: s.month,
@@ -100,6 +104,7 @@ export default function MonthlyExpensePage() {
                   totalMonthly: s.totalMonthly,
                   totalBlocks: s.totalBlocks,
                   totalDailyBill: s.totalDailyBill,
+                  totalMixCost: s.totalMixCost || 0,
                   costPerBlock: s.costPerBlock,
                   grandCostPerBlock: s.grandCostPerBlock,
                   synced: 1,
@@ -124,8 +129,10 @@ export default function MonthlyExpensePage() {
     }
   }, [month]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void loadAll(); }, [loadAll]);
+  useEffect(() => { 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadAll();
+  }, [loadAll]);
 
   const totalMonthly = useMemo(() => electricity + rent + other, [electricity, rent, other]);
   const costPerBlock = useMemo(() => !record || record.totalBlocks === 0 ? 0 : Number((totalMonthly / record.totalBlocks).toFixed(2)), [record, totalMonthly]);
@@ -144,12 +151,13 @@ export default function MonthlyExpensePage() {
         totalMonthly,
         totalBlocks: record?.totalBlocks || 0,
         totalDailyBill: record?.totalDailyBill || 0,
+        totalMixCost: record?.totalMixCost || 0,
         costPerBlock,
         grandCostPerBlock,
         userId,
       });
       await loadAll();
-      alert(`Saved ${month}: ${totalMonthly} Rs | Per Block ${costPerBlock} Rs | Real ${grandCostPerBlock} Rs`);
+      alert(`Saved ${month}: Monthly ${totalMonthly} Rs | Mix ${record?.totalMixCost||0} Rs | Per Block ${costPerBlock} Rs | Real ${grandCostPerBlock} Rs`);
     } finally {
       setSaving(false);
     }
@@ -160,7 +168,7 @@ export default function MonthlyExpensePage() {
       <div className="max-w-[760px] mx-auto px-3 space-y-4">
         <div className="bg-white border rounded-2xl p-4 sm:p-6 shadow-sm">
           <h1 className="font-bold text-[16px]">💡 Monthly Expenses / ماہانہ خرچ</h1>
-          <p className="text-[11px] text-gray-500 mt-1">Add electricity once per month / بجلی مہینے میں ایک بار</p>
+          <p className="text-[11px] text-gray-500 mt-1">Add electricity once per month / بجلی مہینے میں ایک بار - MixCost auto from daily</p>
           <div className="flex gap-2 mt-4">
             <input type="month" value={month} onChange={e=>setMonth(e.target.value)} className="flex-1 border p-3 rounded-xl text-[13px]" />
             <button onClick={() => setMonth(new Date().toISOString().slice(0,7))} className="px-3 py-2 border rounded-xl text-[11px] font-bold">This Month</button>
@@ -169,7 +177,7 @@ export default function MonthlyExpensePage() {
           {loading ? (
             <div className="text-center py-8 text-[12px] text-gray-400">Loading blocks for {month}...</div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
               <div className="bg-gray-50 p-3 rounded-xl border text-center">
                 <div className="text-[10px] text-gray-500 font-bold">کل دن / Days</div>
                 <div className="font-bold text-[18px]">{record?.daysWorked || 0}</div>
@@ -178,6 +186,11 @@ export default function MonthlyExpensePage() {
                 <div className="text-[10px] text-blue-700 font-bold">کل بلاکس / Blocks</div>
                 <div className="font-bold text-[18px]">{record?.totalBlocks || 0} نغ</div>
                 <div className="text-[9px] text-gray-500">{record?.totalBags || 0} بوری</div>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-center">
+                <div className="text-[10px] text-purple-700 font-bold">مکس خرچ / Mix Cost</div>
+                <div className="font-bold text-[14px]">{record?.totalMixCost || 0} Rs</div>
+                <div className="text-[9px] text-gray-500">Trolley + Ghata</div>
               </div>
               <div className="bg-green-50 p-3 rounded-xl border border-green-200 text-center">
                 <div className="text-[10px] text-green-700 font-bold">روزانہ کل بل</div>
@@ -193,11 +206,12 @@ export default function MonthlyExpensePage() {
           </div>
 
           <div className="bg-[#0f4fb8]/10 p-4 rounded-xl mt-6 border text-[13px] font-bold leading-7">
-            ماہانہ کل خرچ / Monthly Total: {totalMonthly} Rs<br/>
-            اس مہینے کل بلاکس / Blocks: {record?.totalBlocks || 0} نغ<br/>
-            بجلی فی بلاک / Per Block: {costPerBlock} Rs<br/>
+            ماہانہ کل خرچ / Monthly Total: {totalMonthly} Rs (Elec {electricity}+Rent {rent}+Other {other})<br/>
+            مکس خرچ اس مہینے / Mix Cost: {record?.totalMixCost || 0} Rs<br/>
+            اس مہینے کل بلاکس / Blocks: {record?.totalBlocks || 0} نغ | روزانہ بل: {record?.totalDailyBill || 0} Rs<br/>
+            بجلی فی بلاک / Per Block Monthly: {costPerBlock} Rs<br/>
             اصل لاگت فی بلاک / Real Cost: {grandCostPerBlock} Rs<br/>
-            <span className="text-[11px] font-normal text-gray-600">Formula: ({record?.totalDailyBill || 0} + {totalMonthly}) ÷ {record?.totalBlocks || 1} = {grandCostPerBlock} Rs</span>
+            <span className="text-[11px] font-normal text-gray-600">Formula: ({record?.totalDailyBill || 0} includes {record?.totalMixCost || 0} mix) + {totalMonthly} ÷ {record?.totalBlocks || 1} = {grandCostPerBlock} Rs</span>
           </div>
 
           <button onClick={() => void handleSave()} disabled={saving} className="w-full bg-black text-white p-4 rounded-xl font-bold mt-4 text-[14px]">{saving ? "Saving..." : `Save Monthly / ماہانہ محفوظ کریں - ${month}`}</button>
@@ -210,16 +224,18 @@ export default function MonthlyExpensePage() {
           ) : (
             <div className="overflow-auto">
               <table className="w-full text-[11px]">
-                <thead className="bg-gray-100"><tr><th className="p-2 text-left">Month</th><th className="p-2">Electric</th><th className="p-2">Rent</th><th className="p-2">Other</th><th className="p-2">Total</th><th className="p-2">Per Block</th><th className="p-2">Status</th></tr></thead>
+                <thead className="bg-gray-100"><tr><th className="p-2 text-left">Month</th><th className="p-2">Electric</th><th className="p-2">Rent</th><th className="p-2">MixCost</th><th className="p-2">DailyBill</th><th className="p-2">Total</th><th className="p-2">Per Block</th><th className="p-2">Real</th><th className="p-2">Status</th></tr></thead>
                 <tbody>
                   {history.map(h => (
                     <tr key={h.month} className="border-t">
                       <td className="p-2 font-bold">{h.month}</td>
                       <td className="p-2">{h.electricity}</td>
                       <td className="p-2">{h.rent}</td>
-                      <td className="p-2">{h.other}</td>
+                      <td className="p-2 font-bold text-purple-600">{h.totalMixCost || 0}</td>
+                      <td className="p-2">{h.totalDailyBill}</td>
                       <td className="p-2 font-bold">{h.totalMonthly} Rs</td>
                       <td className="p-2">{h.costPerBlock} Rs</td>
+                      <td className="p-2 font-bold text-blue-600">{h.grandCostPerBlock} Rs</td>
                       <td className="p-2">{h.synced === 0 ? <span className="text-orange-600">📶 Pending</span> : <span className="text-green-600">✓ Synced</span>}</td>
                     </tr>
                   ))}

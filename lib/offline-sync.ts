@@ -8,7 +8,9 @@ import type {
   MixMaterialEntry,
   MonthlyExpenseLocal,
   OfflineCustomer,
-  WusoolSyncPayload
+  WusoolSyncPayload,
+  OfflineTrolleyEntry,
+  OfflineTrolleyStock,
 } from "./offline-db";
 
 export interface SaleInput {
@@ -43,6 +45,7 @@ export interface BlockDailyInput {
   bills?: BillEntry[];
   mixMaterials?: MixMaterialEntry[];
   totalBill?: number;
+  mixCost?: number;
   costPerBlock?: number;
   isMonthlyElectricity?: boolean;
 }
@@ -55,10 +58,26 @@ export interface MonthlyExpenseInput {
   totalMonthly: number;
   totalBlocks: number;
   totalDailyBill: number;
+  totalMixCost: number;
   costPerBlock: number;
   grandCostPerBlock: number;
   userId: string;
   localId?: string;
+}
+
+export interface TrolleyInput {
+  material: string;
+  rairiInTrolley: number;
+  trolleyPrice: number;
+  date?: string;
+  localId?: string;
+  userId: string;
+}
+
+export interface TrolleyCloseInput {
+  localId: string;
+  actualRairi: number;
+  userId: string;
 }
 
 function genLocalId(prefix: string): string {
@@ -191,15 +210,27 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     .map(b => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
 
   const cleanMix: MixMaterialEntry[] = (data.mixMaterials || [])
-    .filter(m => m.label && m.label.trim().length > 0)
-    .map(m => ({ label: m.label.trim(), qty: m.qty ? m.qty.trim() : "" }));
+    .filter(m => m.label && m.label.trim().length > 0 && (m.rairi || 0) > 0)
+    .map(m => {
+      const rairi = rnd(m.rairi || 0);
+      const ratePer = rnd(m.rate || 0);
+      return { 
+        label: m.label.trim(), 
+        qty: m.qty?.trim() || `${rairi} Rairi`,
+        rairi,
+        rate: ratePer,
+        amount: rnd(m.amount || rairi * ratePer),
+        trolleyEntryId: m.trolleyEntryId?.trim() || "",
+      };
+    });
 
   const extraBills = cleanBills.reduce((sum, b) => {
     if (b.label.toLowerCase().includes("labour")) return sum;
-    if (isElectricLabel(b.label)) return sum;
+    if (data.isMonthlyElectricity && isElectricLabel(b.label)) return sum;
     return sum + (b.amount || 0);
   }, 0);
-  const totalBill = data.totalBill !== undefined ? data.totalBill : wages + extraBills;
+  const mixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
+  const totalBill = data.totalBill !== undefined ? data.totalBill : wages + extraBills + mixCost;
 
   const daily: OfflineBlockDaily = {
     localId, 
@@ -216,34 +247,75 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     bills: cleanBills,
     mixMaterials: cleanMix,
     totalBill,
-    costPerBlock: count > 0 ? Math.round((totalBill / count) * 10) / 10 : 0,
+    mixCost,
+    costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
     isMonthlyElectricity: data.isMonthlyElectricity || false,
   };
 
-  await offlineDB.blockDaily.put(daily);
-  await offlineDB.syncQueue.put({ type: "blockDaily", localId, payload: daily, createdAt: new Date(), attempts: 0 });
+  await offlineDB.transaction("rw", offlineDB.blockDaily, offlineDB.syncQueue, offlineDB.blockProducts, offlineDB.trolleyEntries, offlineDB.trolleyStock, async () => {
+    await offlineDB.blockDaily.put(daily);
+    await offlineDB.syncQueue.put({ type: "blockDaily", localId, payload: daily, createdAt: new Date(), attempts: 0 });
 
-  try {
-    const normalized = data.blocksMade.trim().toLowerCase();
-    let blockProduct = await offlineDB.blockProducts.filter((p: OfflineBlockProduct) => p.name.toLowerCase() === normalized).first();
-    if (!blockProduct) {
-      blockProduct = await offlineDB.blockProducts.where("category").equals("block").filter((p: OfflineBlockProduct) => p.name.toLowerCase().includes((data.blockType || "6").toLowerCase())).first() || undefined;
+    for (const m of cleanMix) {
+      if (m.rairi <= 0) continue;
+      const norm = m.label.toLowerCase().trim();
+      
+      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
+      if (stock) {
+        const newRairi = rnd(stock.totalRairi - m.rairi);
+        const costDeduct = rnd(m.rairi * stock.avgRate);
+        await offlineDB.trolleyStock.update(stock.localId, {
+          totalRairi: newRairi < 0 ? 0 : newRairi,
+          totalCost: rnd(stock.totalCost - costDeduct),
+          updatedAt: nowISO,
+          synced: 0,
+        });
+      }
+
+      if (m.trolleyEntryId) {
+        const entry = await offlineDB.trolleyEntries.get(m.trolleyEntryId);
+        if (entry) {
+          await offlineDB.trolleyEntries.update(m.trolleyEntryId, {
+            totalUsed: rnd((entry.totalUsed || 0) + m.rairi),
+            synced: 0,
+          });
+        }
+      } else {
+        const openEntry = await offlineDB.trolleyEntries
+          .where("normalizedMaterial").equals(norm)
+          .filter(e => e.status === "OPEN")
+          .first();
+        if (openEntry) {
+          await offlineDB.trolleyEntries.update(openEntry.localId, {
+            totalUsed: rnd((openEntry.totalUsed || 0) + m.rairi),
+            synced: 0,
+          });
+        }
+      }
     }
-    if (blockProduct) {
-      const historyEntry: StockHistoryEntry = {
-        qty: count,
-        date: data.date,
-        buyPrice: 0,
-        sellPrice: 0,
-      };
-      await offlineDB.blockProducts.update(blockProduct.localId, {
-        stock: rnd(blockProduct.stock + count),
-        stockHistory: [...(blockProduct.stockHistory || []), historyEntry],
-        lastPurchaseDate: data.date,
-        synced: 0,
-      });
-    }
-  } catch {}
+
+    try {
+      const normalized = data.blocksMade.trim().toLowerCase();
+      let blockProduct = await offlineDB.blockProducts.filter((p: OfflineBlockProduct) => p.name.toLowerCase() === normalized).first();
+      if (!blockProduct) {
+        blockProduct = await offlineDB.blockProducts.where("category").equals("block").filter((p: OfflineBlockProduct) => p.name.toLowerCase().includes((data.blockType || "6").toLowerCase())).first() || undefined;
+      }
+      if (blockProduct) {
+        const historyEntry: StockHistoryEntry = {
+          qty: count,
+          date: data.date,
+          buyPrice: 0,
+          sellPrice: 0,
+        };
+        await offlineDB.blockProducts.update(blockProduct.localId, {
+          stock: rnd(blockProduct.stock + count),
+          stockHistory: [...(blockProduct.stockHistory || []), historyEntry],
+          lastPurchaseDate: data.date,
+          synced: 0,
+        });
+      }
+    } catch {}
+  });
 
   return localId;
 }
@@ -259,6 +331,7 @@ export async function saveMonthlyExpenseOffline(data: MonthlyExpenseInput): Prom
     totalMonthly: rnd(data.totalMonthly),
     totalBlocks: rnd(data.totalBlocks),
     totalDailyBill: rnd(data.totalDailyBill),
+    totalMixCost: rnd(data.totalMixCost || 0),
     costPerBlock: data.costPerBlock,
     grandCostPerBlock: data.grandCostPerBlock,
     synced: 0,
@@ -271,7 +344,6 @@ export async function saveMonthlyExpenseOffline(data: MonthlyExpenseInput): Prom
   
   if (typeof window !== "undefined") {
     localStorage.setItem(`monthly_${data.month}`, JSON.stringify(doc));
-    // INSTANT SYNC - FIXES PENDING BUG
     try {
       const res = await fetch("/api/monthly-expenses", {
         method: "POST",
@@ -286,12 +358,103 @@ export async function saveMonthlyExpenseOffline(data: MonthlyExpenseInput): Prom
           await offlineDB.monthlyExpenses.update(data.month, { _id: j.data._id });
         }
       }
-    } catch {
-      // stays pending, will retry on online event
-    }
+    } catch {}
   }
   
   return data.month;
+}
+
+export async function saveTrolleyOffline(data: TrolleyInput): Promise<string> {
+  const localId = data.localId || genLocalId("trolley");
+  const rairi = rnd(data.rairiInTrolley);
+  const price = rnd(data.trolleyPrice);
+  const rate = Number((price / rairi).toFixed(2));
+  const normalized = data.material.toLowerCase().trim();
+  const nowISO = new Date().toISOString();
+
+  const entry: OfflineTrolleyEntry = {
+    localId,
+    date: data.date || nowISO,
+    material: data.material.trim(),
+    normalizedMaterial: normalized,
+    rairiInTrolley: rairi,
+    trolleyPrice: price,
+    perRairiRate: rate,
+    status: "OPEN",
+    totalUsed: 0,
+    userId: data.userId,
+    synced: 0,
+    createdAt: nowISO,
+  };
+
+  await offlineDB.transaction("rw", offlineDB.trolleyEntries, offlineDB.trolleyStock, offlineDB.syncQueue, async () => {
+    await offlineDB.trolleyEntries.put(entry);
+    const existing = await offlineDB.trolleyStock.where("normalizedMaterial").equals(normalized).first();
+    if (existing) {
+      const newRairi = rnd(existing.totalRairi + rairi);
+      const newCost = rnd(existing.totalCost + price);
+      await offlineDB.trolleyStock.update(existing.localId, {
+        totalRairi: newRairi,
+        totalCost: newCost,
+        avgRate: newRairi > 0 ? Number((newCost / newRairi).toFixed(2)) : rate,
+        updatedAt: nowISO,
+        synced: 0,
+      });
+    } else {
+      const stock: OfflineTrolleyStock = {
+        localId: `stock_${normalized}`,
+        material: data.material.trim(),
+        normalizedMaterial: normalized,
+        totalRairi: rairi,
+        totalCost: price,
+        avgRate: rate,
+        userId: data.userId,
+        synced: 0,
+        createdAt: nowISO,
+        updatedAt: nowISO,
+      };
+      await offlineDB.trolleyStock.put(stock);
+    }
+    await offlineDB.syncQueue.put({ type: "trolleyEntry", localId, payload: entry, createdAt: new Date(), attempts: 0 });
+  });
+
+  return localId;
+}
+
+export async function closeTrolleyOffline(data: TrolleyCloseInput): Promise<void> {
+  const entry = await offlineDB.trolleyEntries.get(data.localId);
+  if (!entry) return;
+  const actual = rnd(data.actualRairi);
+  const diff = actual - rnd(entry.rairiInTrolley);
+  const newRate = Number((entry.trolleyPrice / actual).toFixed(2));
+  const nowISO = new Date().toISOString();
+
+  await offlineDB.transaction("rw", offlineDB.trolleyEntries, offlineDB.trolleyStock, offlineDB.syncQueue, async () => {
+    await offlineDB.trolleyEntries.update(data.localId, {
+      actualRairi: actual,
+      perRairiRate: newRate,
+      status: "CLOSED",
+      synced: 0,
+    });
+    const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(entry.normalizedMaterial).first();
+    if (stock) {
+      const updatedRairi = rnd(stock.totalRairi + diff);
+      await offlineDB.trolleyStock.update(stock.localId, {
+        totalRairi: updatedRairi,
+        avgRate: updatedRairi > 0 ? Number((stock.totalCost / updatedRairi).toFixed(2)) : newRate,
+        updatedAt: nowISO,
+        synced: 0,
+      });
+    }
+    const closePayload = { localId: data.localId, actualRairi: actual, userId: data.userId };
+    await offlineDB.syncQueue.put({ 
+      type: "trolleyClose", 
+      localId: data.localId, 
+      payload: closePayload as unknown as OfflineTrolleyEntry, 
+      createdAt: new Date(), 
+      attempts: 0 
+    });
+  });
 }
 
 export async function syncOfflineSales(): Promise<{ synced: number }> {
@@ -328,9 +491,9 @@ export async function syncOfflineSales(): Promise<{ synced: number }> {
   return { synced };
 }
 
-export async function syncAllOffline(): Promise<{ sales: number; blockDaily: number; wusool: number; monthly: number }> {
+export async function syncAllOffline(): Promise<{ sales: number; blockDaily: number; wusool: number; monthly: number; trolley: number }> {
   if (typeof window === "undefined" || !navigator.onLine) {
-    return { sales: 0, blockDaily: 0, wusool: 0, monthly: 0 };
+    return { sales: 0, blockDaily: 0, wusool: 0, monthly: 0, trolley: 0 };
   }
   
   const salesResult = await syncOfflineSales();
@@ -354,6 +517,7 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
           bills: d.bills || [],
           mixMaterials: d.mixMaterials || [],
           totalBill: d.totalBill,
+          mixCost: d.mixCost,
           isMonthlyElectricity: d.isMonthlyElectricity || false,
         }),
       });
@@ -398,6 +562,7 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
           totalMonthly: m.totalMonthly,
           totalBlocks: m.totalBlocks,
           totalDailyBill: m.totalDailyBill,
+          totalMixCost: m.totalMixCost,
           costPerBlock: m.costPerBlock,
           grandCostPerBlock: m.grandCostPerBlock,
           userId: m.userId,
@@ -412,7 +577,42 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
     } catch {}
   }
 
-  return { sales: salesResult.synced, blockDaily: dailySynced, wusool: wusoolSynced, monthly: monthlySynced };
+  let trolleySynced = 0;
+  const trolleyEntries = await offlineDB.trolleyEntries.where("synced").equals(0).toArray();
+  for (const t of trolleyEntries) {
+    try {
+      if (t.status === "CLOSED" && t.actualRairi) {
+        const res = await fetch("/api/trolley-stock/close", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ localId: t.localId, actualRairi: t.actualRairi, userId: t.userId }),
+        });
+        if (res.ok) {
+          await offlineDB.trolleyEntries.update(t.localId, { synced: 1 });
+          await offlineDB.syncQueue.where("localId").equals(t.localId).delete();
+          trolleySynced++;
+        }
+      } else {
+        const res = await fetch("/api/trolley-stock", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            material: t.material,
+            rairiInTrolley: t.rairiInTrolley,
+            trolleyPrice: t.trolleyPrice,
+            date: t.date,
+            localId: t.localId,
+            userId: t.userId,
+          }),
+        });
+        if (res.ok) {
+          await offlineDB.trolleyEntries.update(t.localId, { synced: 1 });
+          await offlineDB.syncQueue.where("localId").equals(t.localId).delete();
+          trolleySynced++;
+        }
+      }
+    } catch {}
+  }
+
+  return { sales: salesResult.synced, blockDaily: dailySynced, wusool: wusoolSynced, monthly: monthlySynced, trolley: trolleySynced };
 }
 
 if (typeof window !== "undefined") {
