@@ -12,16 +12,27 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type BillBody = { label: string; amount: number };
-type MixBody = { label: string; qty?: string; rairi: number; rate: number; amount?: number; trolleyEntryId?: string };
+type MixBody = { 
+  label: string; qty?: string; rairi: number; rate: number; 
+  amount?: number; trolleyEntryId?: string; batchId?: string;
+};
 type BlockDailyBody = {
-  localId?: string; userId?: string; date?: string; cementBags?: number; blocksMade?: string;
-  blocksCount?: number; dailyWages?: number; ratePerBlock?: number; blockType?: string;
-  bills?: BillBody[]; mixMaterials?: MixBody[]; isMonthlyElectricity?: boolean;
+  localId?: string; userId?: string; date?: string; 
+  cementBags?: number; cementRate?: number; cementCost?: number;
+  blocksMade?: string; blocksCount?: number; 
+  dailyWages?: number; mazdoorRatePerBlock?: number; ratePerBlock?: number; 
+  labourCost?: number; blockType?: string; batchId?: string;
+  bills?: BillBody[]; mixMaterials?: MixBody[]; 
+  trolleyMixCost?: number; mixCost?: number; totalBill?: number;
+  isMonthlyElectricity?: boolean;
 };
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
+
 function getUserFilter(userId: string): Record<string, unknown> {
-  if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  if (Types.ObjectId.isValid(userId)) {
+    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  }
   return { userId: userId };
 }
 
@@ -33,23 +44,23 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
     if (exist) {
       exist.rairi = rnd(exist.rairi + m.rairi);
       exist.amount = rnd((exist.amount ?? 0) + (m.amount ?? 0));
-      exist.qty = `${exist.rairi} Rairi`;
+      exist.qty = `${exist.rairi} ریڑھی`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} Rairi` });
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی` });
     }
   }
   return Array.from(map.values());
 }
 
 async function recalcAllStocks(userId: string): Promise<void> {
-  const all = await TrolleyEntryModel.find({ ...getUserFilter(userId) }).lean() as unknown as Array<{
-    material: string;
-    normalizedMaterial: string;
-    rairiInTrolley: number;
-    actualRairi?: number;
-    totalUsed?: number;
-    perRairiRate?: number;
+  const all = await TrolleyEntryModel.find({ 
+    ...getUserFilter(userId)
+  }).lean() as unknown as Array<{
+    material: string; normalizedMaterial: string;
+    rairiInTrolley: number; actualRairi?: number;
+    totalUsed?: number; perRairiRate?: number;
   }>;
+  
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of all) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
@@ -61,13 +72,17 @@ async function recalcAllStocks(userId: string): Promise<void> {
     cur.cost += rem * Number(e.perRairiRate ?? 0);
     map.set(norm, cur);
   }
+  
   for (const [norm, v] of map) {
     const avg = v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0;
     const matName = all.find((e) => String(e.normalizedMaterial || "").toLowerCase().trim() === norm)?.material || norm;
     await TrolleyStockModel.updateOne(
       { ...getUserFilter(userId), normalizedMaterial: norm },
       {
-        $set: { material: matName, totalRairi: rnd(v.rairi), totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date() },
+        $set: { 
+          material: matName, totalRairi: rnd(v.rairi), 
+          totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date()
+        },
         $setOnInsert: { localId: `stock_${norm}`, userId },
       },
       { upsert: true }
@@ -85,6 +100,7 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get("to");
   const baseFilter = getUserFilter(userId);
   const dateFilter: Record<string, unknown> = from && to ? { date: { $gte: new Date(from), $lte: new Date(to) } } : {};
+  // NO batchId filter - show all
   const data = await BlockDaily.find({ ...baseFilter, ...dateFilter }).sort({ date: -1 }).limit(500).lean();
   return NextResponse.json({ data, blockDailies: data });
 }
@@ -97,14 +113,22 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
   if (!body.blocksMade?.trim()) return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
 
-  const rate = rnd(body.ratePerBlock || 3);
+  const batchId = body.batchId; // OPTIONAL
+  const mazdoorRate = rnd(body.mazdoorRatePerBlock || body.ratePerBlock || 3);
   const count = rnd(body.blocksCount || 0);
   if (count <= 0) return NextResponse.json({ error: "blocksCount > 0 required" }, { status: 400 });
 
-  const wages = rnd(body.dailyWages || count * rate);
+  const cementBags = rnd(body.cementBags || 0);
+  const cementRate = rnd(body.cementRate || 1400);
+  const cementCost = rnd(body.cementCost || cementBags * cementRate);
+  
+  const labourCost = rnd(body.labourCost || body.dailyWages || count * mazdoorRate);
+  const wages = labourCost;
   const name = body.blocksMade.trim();
 
-  const cleanBills = (body.bills || []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
+  const cleanBills = (body.bills || []).filter((b) => b.label?.trim()).map((b) => ({ 
+    label: b.label.trim(), amount: rnd(b.amount || 0) 
+  }));
 
   let cleanMix: MixBody[] = (body.mixMaterials || [])
     .filter((m) => m.label?.trim() && (m.rairi || 0) > 0)
@@ -113,11 +137,12 @@ export async function POST(req: NextRequest) {
       const ratePerRairi = rnd(m.rate || 0);
       return {
         label: m.label.trim(),
-        qty: m.qty?.trim() || `${rairi} Rairi`,
+        qty: m.qty?.trim() || `${rairi} ریڑھی`,
         rairi,
         rate: ratePerRairi,
         amount: rnd(m.amount || rairi * ratePerRairi),
         trolleyEntryId: m.trolleyEntryId?.trim(),
+        batchId: m.batchId || batchId,
       };
     });
   cleanMix = mergeSameMaterial(cleanMix);
@@ -127,19 +152,26 @@ export async function POST(req: NextRequest) {
     if (body.isMonthlyElectricity && (b.label.toLowerCase().includes("electric") || b.label.includes("بجلی"))) return sum;
     return sum + (b.amount || 0);
   }, 0);
-  const mixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
-  const totalBill = wages + extraBills + mixCost;
+  
+  const trolleyMixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
+  const mixCost = trolleyMixCost + cementCost;
+  const totalBill = body.totalBill !== undefined ? rnd(body.totalBill) : wages + extraBills + mixCost;
   const dailyDate = body.date ? new Date(body.date) : new Date();
 
   const daily = await BlockDaily.create({
-    date: dailyDate, cementBags: rnd(body.cementBags || 0), blocksMade: name, blocksCount: count,
-    dailyWages: wages, ratePerBlock: rate, blockType: body.blockType || "6 inch", userId,
-    bills: cleanBills, mixMaterials: cleanMix, totalBill, mixCost,
+    date: dailyDate, 
+    cementBags, cementRate, cementCost,
+    blocksMade: name, blocksCount: count,
+    dailyWages: wages, mazdoorRatePerBlock: mazdoorRate, ratePerBlock: mazdoorRate, labourCost: labourCost,
+    blockType: body.blockType || "6 inch", userId, batchId,
+    bills: cleanBills, mixMaterials: cleanMix, 
+    trolleyMixCost, mixCost, totalBill,
     costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
-    isMonthlyElectricity: body.isMonthlyElectricity || false, localId: body.localId,
+    isMonthlyElectricity: body.isMonthlyElectricity || false, 
+    localId: body.localId,
   });
 
-  // DEDUCT USED - FIXED: fallback to FIFO if trolleyEntryId is stock id
+  // DEDUCT USED - No batch filter, FIFO by date - Maneray 60 / Ghata 55
   for (const mix of cleanMix) {
     if (mix.rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();

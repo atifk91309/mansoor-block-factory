@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 type MonthlyBody = {
   month: string;
+  batchId?: string;
   electricity?: number;
   rent?: number;
   other?: number;
@@ -16,19 +17,22 @@ type MonthlyBody = {
   totalBlocks?: number;
   totalDailyBill?: number;
   totalMixCost?: number;
+  totalCementCost?: number;
+  totalCementBags?: number;
+  totalTrolleyCost?: number;
+  totalLabourCost?: number;
   costPerBlock?: number;
   grandCostPerBlock?: number;
+  trueCostPerBlock?: number;
   userId?: string;
   _id?: string;
 };
 
-function rnd(n: number): number {
-  return Math.round(n || 0);
-}
+function rnd(n: number): number { return Math.round(n || 0); }
 
 export async function GET(req: NextRequest) {
   await connectDB();
-  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
+  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
   const queryUserId = req.nextUrl.searchParams.get("userId");
   const userId = session?.user?.id || queryUserId;
   if (!userId) return NextResponse.json({ data: [] });
@@ -37,6 +41,7 @@ export async function GET(req: NextRequest) {
   const filter: Record<string, unknown> = { userId };
   if (month) filter.month = month;
 
+  // NO batchId filter - show all months
   const data = await MonthlyExpense.find(filter).sort({ month: -1 }).lean();
   return NextResponse.json({ data });
 }
@@ -49,16 +54,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "month required YYYY-MM" }, { status: 400 });
   }
 
-  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
+  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
   const userId = session?.user?.id || body.userId;
   if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
 
+  const batchId = body.batchId; // OPTIONAL
   const electricity = rnd(body.electricity || 0);
   const rent = rnd(body.rent || 0);
   const other = rnd(body.other || 0);
   const totalBlocks = rnd(body.totalBlocks || 0);
   const totalDailyBill = rnd(body.totalDailyBill || 0);
   const totalMixCost = rnd(body.totalMixCost || 0);
+  const totalCementCost = rnd(body.totalCementCost || 0);
+  const totalCementBags = rnd(body.totalCementBags || 0);
+  const totalTrolleyCost = rnd(body.totalTrolleyCost || 0);
+  const totalLabourCost = rnd(body.totalLabourCost || 0);
   
   const totalMonthly = electricity + rent + other;
   const costPerBlock = totalBlocks > 0 ? Number((totalMonthly / totalBlocks).toFixed(2)) : 0;
@@ -68,6 +78,7 @@ export async function POST(req: NextRequest) {
     { userId, month: body.month },
     {
       month: body.month,
+      batchId,
       userId,
       electricity,
       rent,
@@ -76,8 +87,13 @@ export async function POST(req: NextRequest) {
       totalBlocks,
       totalDailyBill,
       totalMixCost,
+      totalCementCost,
+      totalCementBags,
+      totalTrolleyCost,
+      totalLabourCost,
       costPerBlock,
       grandCostPerBlock,
+      trueCostPerBlock: grandCostPerBlock,
     },
     { upsert: true, new: true, runValidators: true }
   );

@@ -4,48 +4,22 @@ import BlockDaily from "@/models/BlockDaily";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/route";
-import { recalcMonthlyExpense } from "@/lib/calc-monthly";
-import { Types } from "mongoose";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type CloseBody = { localId: string; actualRairi: number; userId?: string };
 
-type MixMaterial = {
+type MixMaterialDoc = {
   label: string;
   rairi: number;
-  amount?: number;
-  rate?: number;
+  amount: number;
+  rate: number;
   trolleyEntryId?: string;
-  toObject?: () => MixMaterial & Record<string, unknown>;
-};
-
-type BlockDailyLean = {
-  _id: Types.ObjectId;
-  mixMaterials: MixMaterial[];
-  mixCost?: number;
-  totalBill?: number;
-  blocksCount: number;
-  date: Date;
-};
-
-type TrolleyEntryLean = {
-  rairiInTrolley: number;
-  actualRairi?: number;
-  totalUsed?: number;
-  perRairiRate?: number;
 };
 
 function rnd(n: number): number {
   return Math.round(Number(n) || 0);
-}
-
-function getUserFilter(userId: string): Record<string, unknown> {
-  if (Types.ObjectId.isValid(userId)) {
-    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
-  }
-  return { userId: userId };
 }
 
 export async function POST(req: NextRequest) {
@@ -59,23 +33,29 @@ export async function POST(req: NextRequest) {
   const actual = rnd(body.actualRairi);
   if (actual <= 0) return NextResponse.json({ error: "actualRairi > 0" }, { status: 400 });
 
-  const entry = await TrolleyEntryModel.findOne({ ...getUserFilter(userId), localId: body.localId });
+  const entry = await TrolleyEntryModel.findOne({ userId: userId, localId: body.localId });
   if (!entry) return NextResponse.json({ error: "Trolley not found" }, { status: 404 });
 
   const est = rnd(entry.rairiInTrolley);
   const newRate = Number((entry.trolleyPrice / actual).toFixed(2));
   const oldRate = entry.perRairiRate;
+  const rairiLoss = Math.max(0, est - actual);
+  const rairiRemaining = Math.max(0, actual - rnd(entry.totalUsed));
 
+  // FIX: direct set — no as unknown cast
   entry.actualRairi = actual;
   entry.perRairiRate = newRate;
   entry.status = "CLOSED";
+  entry.rairiLoss = rairiLoss;
+  entry.rairiRemaining = rairiRemaining;
+  entry.closedAt = new Date();
   await entry.save();
 
-  // Stock recalc from all entries
-  const allEntries = (await TrolleyEntryModel.find({
-    ...getUserFilter(userId),
+  // Stock recalc - No batch filter (tumhari requirement)
+  const allEntries = await TrolleyEntryModel.find({
+    userId: userId,
     normalizedMaterial: entry.normalizedMaterial,
-  }).lean()) as unknown as TrolleyEntryLean[];
+  }).lean();
 
   let totalRairi = 0;
   let totalCost = 0;
@@ -88,25 +68,22 @@ export async function POST(req: NextRequest) {
   const avgRate = totalRairi > 0 ? Number((totalCost / totalRairi).toFixed(2)) : 0;
 
   await TrolleyStockModel.updateOne(
-    { ...getUserFilter(userId), normalizedMaterial: entry.normalizedMaterial },
+    { userId: userId, normalizedMaterial: entry.normalizedMaterial },
     { $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() } },
     { upsert: true }
   );
 
-  // Force recalc all dailies by label - fixes 14.27
-  const allDailies = (await BlockDaily.find({ ...getUserFilter(userId) })
-    .sort({ date: -1 })
-    .limit(300)
-    .lean()) as unknown as BlockDailyLean[];
+  // Recalc dailies - No batch filter
+  const allDailies = await BlockDaily.find({ userId: userId }).sort({ date: -1 }).limit(500).lean();
 
   let affected = 0;
   const affectedMonths = new Set<string>();
 
   for (const daily of allDailies) {
     let hasMatch = false;
-    let newMixCost = 0;
+    let newTrolleyMixCost = 0;
 
-    const updatedMix = daily.mixMaterials.map((m) => {
+    const updatedMix: MixMaterialDoc[] = daily.mixMaterials.map((m) => {
       const labelNorm = String(m.label || "").toLowerCase().trim();
       const idMatch = m.trolleyEntryId === body.localId;
       const labelMatch = labelNorm === entry.normalizedMaterial;
@@ -115,23 +92,47 @@ export async function POST(req: NextRequest) {
       if (isMatch) {
         hasMatch = true;
         const amt = rnd(m.rairi * newRate);
-        newMixCost += amt;
-        const raw = m.toObject ? m.toObject() : { ...m };
-        return { ...raw, rate: newRate, amount: amt, trolleyEntryId: body.localId };
+        newTrolleyMixCost += amt;
+        return {
+          label: m.label,
+          rairi: m.rairi,
+          rate: newRate,
+          amount: amt,
+          trolleyEntryId: body.localId,
+        };
       }
-      newMixCost += rnd(m.amount ?? 0);
-      return m;
+      newTrolleyMixCost += rnd(m.amount ?? 0);
+      return {
+        label: m.label,
+        rairi: m.rairi,
+        rate: m.rate,
+        amount: m.amount,
+        trolleyEntryId: m.trolleyEntryId,
+      };
     });
 
     if (!hasMatch) continue;
-    if (rnd(daily.mixCost ?? 0) === newMixCost) continue;
 
-    const newTotalBill = rnd((daily.totalBill ?? 0) + (newMixCost - rnd(daily.mixCost ?? 0)));
+    const oldTrolley = rnd(daily.trolleyMixCost ?? 0);
+    if (oldTrolley === newTrolleyMixCost) continue;
+
+    const cementCost = rnd(daily.cementCost || 0);
+    const newMixCost = newTrolleyMixCost + cementCost;
+    const oldMixCost = rnd(daily.mixCost || 0);
+    const newTotalBill = rnd((daily.totalBill ?? 0) + (newMixCost - oldMixCost));
     const newCostPerBlock = daily.blocksCount > 0 ? Number((newTotalBill / daily.blocksCount).toFixed(2)) : 0;
 
     await BlockDaily.updateOne(
       { _id: daily._id },
-      { $set: { mixMaterials: updatedMix, mixCost: newMixCost, totalBill: newTotalBill, costPerBlock: newCostPerBlock } }
+      {
+        $set: {
+          mixMaterials: updatedMix,
+          trolleyMixCost: newTrolleyMixCost,
+          mixCost: newMixCost,
+          totalBill: newTotalBill,
+          costPerBlock: newCostPerBlock,
+        },
+      }
     );
     affected++;
     const d = new Date(daily.date);
@@ -140,10 +141,9 @@ export async function POST(req: NextRequest) {
 
   for (const mm of affectedMonths) {
     try {
+      const { recalcMonthlyExpense } = await import("@/lib/calc-monthly");
       await recalcMonthlyExpense(userId, mm);
-    } catch {
-      // ignore recalc error
-    }
+    } catch {}
   }
 
   return NextResponse.json({
@@ -152,6 +152,8 @@ export async function POST(req: NextRequest) {
     diff: actual - est,
     oldRate,
     newRate,
+    rairiLoss,
+    rairiRemaining,
     affectedDailies: affected,
     affectedMonths: Array.from(affectedMonths),
     stock: { totalRairi, totalCost, avgRate },

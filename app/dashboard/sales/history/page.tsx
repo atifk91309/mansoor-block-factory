@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { offlineDB } from "@/lib/offline-db";
 
-type SaleItem = { productName: string; category: string; quantity: number; sellPrice: number; buyPrice: number; totalSell: number; totalProfit: number; };
+type SaleItem = { productName: string; category: string; quantity: number; sellPrice: number; buyPrice: number; totalSell: number; totalProfit: number };
 
 type Sale = {
   _id: string;
@@ -133,10 +133,12 @@ export default function SalesHistoryPage() {
           return;
         }
         const statusQ = status === "pending" ? "&paymentType=udhar" : status === "paid" ? "&paymentType=cash" : "";
+        // No Batch - no batchId param
         const res = await fetch(`/api/sales?filter=${f}&search=${encodeURIComponent(s)}&page=${p}&limit=20${statusQ}`);
         const data = (await res.json()) as SalesApiResponse;
-        if (p === 1) setSales(data.sales);
-        else setSales((prev) => [...prev, ...data.sales]);
+        const filteredSales = data.sales || [];
+        if (p === 1) setSales(filteredSales);
+        else setSales((prev) => [...prev, ...filteredSales]);
         setTotal(rnd(data.total));
         setProfit(rnd(data.profit));
         setPagination(data.pagination);
@@ -152,12 +154,8 @@ export default function SalesHistoryPage() {
               setPendingTotal(rnd(pending));
             }
           }
-        } catch {
-          /* ignore */
-        }
-      } catch {
-        /* ignore */
-      } finally {
+        } catch {}
+      } catch {} finally {
         setLoading(false);
       }
     },
@@ -179,68 +177,68 @@ export default function SalesHistoryPage() {
   });
 
   return (
-    <div className="p-3 sm:p-6 max-w-6xl mx-auto min-h-screen bg-gray-50">
-      {isOffline && <div className="mb-3 bg-amber-50 border text-amber-800 text-[12px] p-2.5 rounded-xl text-center">📶 Offline • Showing offline block sales</div>}
+    <div className="p-3 sm:p-6 max-w-6xl mx-auto min-h-screen bg-gray-50" dir="rtl">
+      {isOffline && <div className="mb-3 bg-amber-50 border text-amber-800 text-[12px] p-2.5 rounded-xl text-center">📶 آف لائن • آف لائن فروخت دکھائی جا رہی ہے</div>}
       {pendingTotal > 0 && (
         <div className="mb-3 bg-red-50 border border-red-200 text-red-800 text-[12px] p-2.5 rounded-xl flex justify-between">
-          <span>📒 Udhar Pending ({filter}): Rs.{pendingTotal.toLocaleString()}</span>
-          <Link href="/dashboard/customers" className="bg-red-600 text-white px-3 py-1 rounded-lg text-[10px]">Khata</Link>
+          <span>📒 ادھار باقی ({filter}): {pendingTotal.toLocaleString()} روپے</span>
+          <Link href="/dashboard/customers" className="bg-red-600 text-white px-3 py-1 rounded-lg text-[10px]">کھاتہ</Link>
         </div>
       )}
 
-      <div className="flex justify-between mb-4">
+      <div className="flex justify-between mb-4 gap-2">
         <div>
-          <Link href="/dashboard/sales" className="text-[11px] text-gray-500">← POS</Link>
-          <h1 className="text-[17px] font-bold">🧱 Mansoor Sales History</h1>
-          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} bills • Rs.{total.toLocaleString()} • Profit Rs.{profit.toLocaleString()} • Shewa Road</p>
+          <Link href="/dashboard/sales" className="text-[11px] text-gray-500">← فروخت</Link>
+          <h1 className="text-[17px] font-bold">🧱 منصور فروخت تاریخ - No Batch</h1>
+          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} بل • {total.toLocaleString()} روپے • منافع {profit.toLocaleString()} روپے • شیوہ روڈ</p>
         </div>
-        <Link href="/dashboard/sales" className="bg-black text-white px-4 py-2 rounded-xl text-[12px] h-fit">+ New Block Sale</Link>
+        <Link href="/dashboard/sales" className="bg-black text-white px-4 py-2 rounded-xl text-[12px] h-fit">+ نئی فروخت</Link>
       </div>
 
       <div className="bg-white p-3 rounded-xl border mb-4 flex flex-col gap-2">
         <div className="flex gap-1.5 overflow-x-auto">
           {FILTERS.map((f) => (
-            <button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] capitalize ${filter === f ? "bg-black text-white" : "bg-gray-100"}`}>{f}</button>
+            <button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] capitalize ${filter === f ? "bg-black text-white" : "bg-gray-100"}`}>{f==="today"?"آج":f==="weekly"?"ہفتہ":f==="monthly"?"مہینہ":"سب"}</button>
           ))}
         </div>
         <div className="flex gap-1.5">
-          <button onClick={() => { setStatusFilter("all"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "all" ? "bg-black text-white" : "bg-gray-100"}`}>All</button>
-          <button onClick={() => { setStatusFilter("paid"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "paid" ? "bg-green-600 text-white" : "bg-gray-100"}`}>Cash</button>
-          <button onClick={() => { setStatusFilter("pending"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "pending" ? "bg-red-600 text-white" : "bg-gray-100"}`}>Udhar</button>
+          <button onClick={() => { setStatusFilter("all"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "all" ? "bg-black text-white" : "bg-gray-100"}`}>سب</button>
+          <button onClick={() => { setStatusFilter("paid"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "paid" ? "bg-green-600 text-white" : "bg-gray-100"}`}>نقد</button>
+          <button onClick={() => { setStatusFilter("pending"); setPage(1); }} className={`px-3 py-1.5 rounded-full text-[11px] ${statusFilter === "pending" ? "bg-red-600 text-white" : "bg-gray-100"}`}>ادھار</button>
         </div>
-        <input placeholder="🔍 Search invoice / customer / block type..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="border p-2.5 rounded-lg w-full text-[12px]" />
+        <input placeholder="🔍 بل نمبر / گاہک / بلاک تلاش کریں..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="border p-2.5 rounded-lg w-full text-[12px]" />
       </div>
 
       {loading && page === 1 ? (
-        <p className="text-center py-10 text-[12px]">Loading block sales...</p>
+        <p className="text-center py-10 text-[12px]">بلاک فروخت لوڈ ہو رہی ہے...</p>
       ) : (
         <div className="space-y-3">
           {Object.keys(grouped).length === 0 ? (
-            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">No sales — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""} • Shewa Road Factory</p>
+            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">کوئی فروخت نہیں — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""} • شیوہ روڈ فیکٹری</p>
           ) : (
             Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).map(([date, daySales]) => {
               const dt = daySales.reduce((a, b) => a + b.totalSell, 0);
               const dp = daySales.reduce((a, b) => a + b.totalProfit, 0);
               return (
                 <div key={date} className="bg-white rounded-xl border overflow-hidden">
-                  <div className="bg-gray-50 px-3 py-2 flex justify-between text-[11px] font-bold border-b"><span>{date} • {daySales.length} bills</span><span className="text-green-700">Rs.{rnd(dt).toLocaleString()} <span className="text-blue-600">Profit +{rnd(dp).toLocaleString()}</span></span></div>
+                  <div className="bg-gray-50 px-3 py-2 flex justify-between text-[11px] font-bold border-b"><span>{date} • {daySales.length} بل</span><span className="text-green-700">{rnd(dt).toLocaleString()} روپے <span className="text-blue-600">منافع +{rnd(dp).toLocaleString()}</span></span></div>
                   {daySales.map((s) => (
                     <div key={s._id} className={`px-3 py-2.5 flex justify-between text-[12px] border-b last:border-0 ${s.isUdhar ? "bg-red-50/50" : ""}`}>
                       <div>
-                        <p className="font-medium">{s.invoiceNo} • {s.customerName} • {s.items[0]?.productName || "Blocks"} x{s.totalQuantity} {s.isUdhar ? <span className="bg-red-600 text-white px-2 rounded-full text-[9px]">UDHAR</span> : <span className="bg-green-100 px-2 rounded-full text-[9px]">CASH</span>}</p>
-                        <p className="text-[10px] text-gray-400">{s.items.map(i => `${i.productName} ${i.quantity}`).join(", ")} • Profit Rs.{s.totalProfit} • {new Date(s.createdAt).toLocaleTimeString()} • {s.items[0]?.category || "block"}</p>
+                        <p className="font-medium">{s.invoiceNo} • {s.customerName} • {s.items[0]?.productName || "بلاک"} x{s.totalQuantity} {s.isUdhar ? <span className="bg-red-600 text-white px-2 rounded-full text-[9px]">ادھار</span> : <span className="bg-green-100 px-2 rounded-full text-[9px]">نقد</span>}</p>
+                        <p className="text-[10px] text-gray-400">{s.items.map(i => `${i.productName} ${i.quantity}`).join(", ")} • منافع {s.totalProfit} روپے • {new Date(s.createdAt).toLocaleTimeString()} • {s.items[0]?.category || "block"}</p>
                       </div>
-                      <span className="font-bold">Rs.{s.totalSell.toLocaleString()}</span>
+                      <span className="font-bold">{s.totalSell.toLocaleString()} روپے</span>
                     </div>
                   ))}
                 </div>
               );
             })
           )}
-          {pagination.hasMore && <button onClick={() => setPage((p) => p + 1)} className="w-full py-2.5 bg-white border rounded-xl text-[12px]">Load More ({pagination.totalCount - sales.length})</button>}
+          {pagination.hasMore && <button onClick={() => setPage((p) => p + 1)} className="w-full py-2.5 bg-white border rounded-xl text-[12px]">مزید لوڈ کریں ({pagination.totalCount - sales.length})</button>}
         </div>
       )}
-      <div className="mt-4 bg-black text-white p-4 rounded-xl flex justify-between"><div><p className="text-[12px] opacity-70">Total {filter} • {pagination.totalCount} bills • Blocks + Rait</p><p className="text-[11px] opacity-60">Profit Rs.{profit.toLocaleString()} • Pending Rs.{pendingTotal.toLocaleString()}</p></div><span className="text-[20px] font-bold">Rs.{total.toLocaleString()}</span></div>
+      <div className="mt-4 bg-black text-white p-4 rounded-xl flex justify-between"><div><p className="text-[12px] opacity-70">کل {filter} • {pagination.totalCount} بل • بلاک + ریت</p><p className="text-[11px] opacity-60">منافع {profit.toLocaleString()} روپے • ادھار باقی {pendingTotal.toLocaleString()} روپے</p></div><span className="text-[20px] font-bold">{total.toLocaleString()} روپے</span></div>
     </div>
   );
 }

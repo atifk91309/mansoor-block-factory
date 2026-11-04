@@ -1,7 +1,8 @@
-import mongoose, { Schema, Document, Types } from "mongoose";
+import mongoose, { Schema, Document, Types, Query } from "mongoose";
 
 export interface IMonthlyExpense extends Document {
   month: string;
+  batchId?: string; // OPTIONAL now
   userId: Types.ObjectId | string;
   electricity: number;
   rent: number;
@@ -10,22 +11,33 @@ export interface IMonthlyExpense extends Document {
   totalBlocks: number;
   totalDailyBill: number;
   totalMixCost: number;
+  totalCementCost: number;
+  totalCementBags: number;
+  totalTrolleyCost: number;
+  totalLabourCost: number;
   costPerBlock: number;
   grandCostPerBlock: number;
+  trueCostPerBlock: number;
 }
 
 const MonthlyExpenseSchema = new Schema<IMonthlyExpense>({
   month: { type: String, required: true, trim: true, index: true },
+  batchId: { type: String, required: false, trim: true }, // OPTIONAL - No default BATCH-1
   userId: { type: Schema.Types.Mixed, required: true, index: true },
   electricity: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   rent: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   other: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
-  totalMonthly: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
+  totalMonthly: { type: Number, default: 0, min: 0 },
   totalBlocks: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
-  totalDailyBill: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
-  totalMixCost: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
+  totalDailyBill: { type: Number, default: 0, min: 0 },
+  totalMixCost: { type: Number, default: 0, min: 0 },
+  totalCementCost: { type: Number, default: 0, min: 0 },
+  totalCementBags: { type: Number, default: 0, min: 0 },
+  totalTrolleyCost: { type: Number, default: 0, min: 0 },
+  totalLabourCost: { type: Number, default: 0, min: 0 },
   costPerBlock: { type: Number, default: 0, min: 0 },
   grandCostPerBlock: { type: Number, default: 0, min: 0 },
+  trueCostPerBlock: { type: Number, default: 0, min: 0 },
 }, { timestamps: true });
 
 type CalcInput = {
@@ -45,10 +57,9 @@ function calcFields(doc: CalcInput) {
   const totalMonthly = electricity + rent + other;
   const costPerBlock = totalBlocks > 0 ? Number((totalMonthly / totalBlocks).toFixed(2)) : 0;
   const grandCostPerBlock = totalBlocks > 0 ? Number(((totalDailyBill + totalMonthly) / totalBlocks).toFixed(2)) : 0;
-  return { totalMonthly, costPerBlock, grandCostPerBlock };
+  return { totalMonthly, costPerBlock, grandCostPerBlock, trueCostPerBlock: grandCostPerBlock };
 }
 
-// FIX 1: No `next` param in validate hook for Mongoose 7+
 MonthlyExpenseSchema.pre("validate", function() {
   const c = calcFields({
     electricity: this.electricity,
@@ -60,25 +71,30 @@ MonthlyExpenseSchema.pre("validate", function() {
   this.totalMonthly = c.totalMonthly;
   this.costPerBlock = c.costPerBlock;
   this.grandCostPerBlock = c.grandCostPerBlock;
+  this.trueCostPerBlock = c.trueCostPerBlock;
+  if (this.totalCementCost || this.totalTrolleyCost) {
+    this.totalMixCost = (this.totalCementCost || 0) + (this.totalTrolleyCost || 0);
+  }
 });
 
-// FIX 2: Typed query hook - no `any`
-MonthlyExpenseSchema.pre("findOneAndUpdate", function() {
-  const update = this.getUpdate() as { $set?: Partial<IMonthlyExpense> } | null;
-  if (!update) return;
-
-  // Normalize to $set object
-  const setObj = (update as { $set?: Partial<IMonthlyExpense> }).$set || (update as Partial<IMonthlyExpense>);
-
-  const hasRelevant = 
+MonthlyExpenseSchema.pre("findOneAndUpdate", function(this: Query<unknown, IMonthlyExpense>) {
+  const rawUpdate = this.getUpdate();
+  if (!rawUpdate) return;
+  const updateObj = rawUpdate as Record<string, unknown>;
+  const setObj = (updateObj.$set as Partial<IMonthlyExpense> | undefined) || (updateObj as unknown as Partial<IMonthlyExpense>);
+  const hasRelevant =
     setObj.electricity !== undefined ||
     setObj.rent !== undefined ||
     setObj.other !== undefined ||
     setObj.totalBlocks !== undefined ||
-    setObj.totalDailyBill !== undefined;
-
+    setObj.totalDailyBill !== undefined ||
+    setObj.totalCementCost !== undefined ||
+    setObj.totalTrolleyCost !== undefined ||
+    setObj.totalLabourCost !== undefined;
   if (!hasRelevant) return;
-
+  if (setObj.totalCementCost !== undefined || setObj.totalTrolleyCost !== undefined) {
+    setObj.totalMixCost = (setObj.totalCementCost || 0) + (setObj.totalTrolleyCost || 0);
+  }
   const c = calcFields({
     electricity: setObj.electricity,
     rent: setObj.rent,
@@ -86,20 +102,10 @@ MonthlyExpenseSchema.pre("findOneAndUpdate", function() {
     totalBlocks: setObj.totalBlocks,
     totalDailyBill: setObj.totalDailyBill,
   });
-
-  // Only update what was actually changing
-  if (setObj.electricity !== undefined || setObj.rent !== undefined || setObj.other !== undefined) {
-    setObj.totalMonthly = c.totalMonthly;
-    setObj.costPerBlock = c.costPerBlock;
-  }
-  if (setObj.totalDailyBill !== undefined || setObj.totalBlocks !== undefined) {
-    setObj.grandCostPerBlock = c.grandCostPerBlock;
-    if (setObj.totalBlocks !== undefined && setObj.electricity === undefined) {
-      // keep totalMonthly from existing doc, but ensure grandCost is fresh
-      setObj.totalMonthly = setObj.totalMonthly ?? c.totalMonthly;
-    }
-  }
-
+  setObj.totalMonthly = c.totalMonthly;
+  setObj.costPerBlock = c.costPerBlock;
+  setObj.grandCostPerBlock = c.grandCostPerBlock;
+  setObj.trueCostPerBlock = c.trueCostPerBlock;
   this.setUpdate({ $set: setObj });
 });
 

@@ -3,13 +3,14 @@ import { useEffect, useState, useCallback, useSyncExternalStore, useRef } from "
 import { offlineDB } from "@/lib/offline-db";
 import type { OfflineProduct, PaymentType } from "@/lib/offline-db";
 import { getOfflineUser } from "@/lib/offline-auth";
-import { saveSaleOffline } from "@/lib/offline-sync";
+import { saveSaleOffline, type SaleInput } from "@/lib/offline-sync";
 
 type BlockCategory = "block" | "crush" | "khaka" | "bajri" | "rait" | "cement" | "other";
 type Product = {
   _id: string; name: string; category: BlockCategory; buyPrice: number; buyPriceAvg: number; sellPrice: number; stock: number; stockMode: "limited" | "unlimited";
   stockHistory?: { qty: number; date: string; buyPrice: number; sellPrice: number }[];
   lastPurchaseDate?: string;
+  rairiPerTrolley?: number;
 };
 type Sale = {
   _id: string; invoiceNo: string; customerName: string; totalQuantity: number; totalSell: number; totalProfit: number; paymentType: PaymentType; isUdhar: boolean; createdAt: string;
@@ -22,6 +23,7 @@ type SalesApiResponse = { sales: Sale[]; pagination: Pagination };
 type ProductApiResponse = { products: Product[]; pagination?: Pagination } | Product[];
 type OfflineUser = { _id?: string; id?: string } | null;
 type SessionRes = { user?: { id?: string; _id?: string } };
+type OfflineProductExtended = OfflineProduct & { rairiPerTrolley?: number };
 
 function useIsOnline() {
   const sub = useCallback((cb: () => void) => { window.addEventListener("online", cb); window.addEventListener("offline", cb); return () => { window.removeEventListener("online", cb); window.removeEventListener("offline", cb); }; }, []);
@@ -50,21 +52,26 @@ export default function SalesPage() {
   const [customerName, setCustomerName] = useState("Walk-in");
   const [paymentType, setPaymentType] = useState<PaymentType>("cash");
   const [pendingCount, setPendingCount] = useState(0);
-  const [mounted, setMounted] = useState(false);
   const [customerError, setCustomerError] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const isOnlineHook = useIsOnline();
-  const isOffline = mounted && !isOnlineHook;
+  const isOffline = !isOnlineHook;
   const customerInputRef = useRef<HTMLInputElement>(null);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => { if (isProcessing) { e.preventDefault(); e.returnValue = "Sale is processing..."; } };
-    window.addEventListener("beforeunload", handler); return () => window.removeEventListener("beforeunload", handler);
+    const handler = (e: BeforeUnloadEvent) => { if (isProcessing) { e.preventDefault(); e.returnValue = "فروخت جاری ہے..."; } };
+    window.addEventListener("beforeunload", handler); 
+    return () => window.removeEventListener("beforeunload", handler);
   }, [isProcessing]);
 
-  const refreshCounts = useCallback(async () => { try { const c = await offlineDB.sales.where("synced").equals(0).count(); setPendingCount(c); } catch {} }, []);
+  const refreshCounts = useCallback(async () => { 
+    try { 
+      const all = await offlineDB.sales.toArray();
+      const c = all.filter(s=> s.synced===0).length;
+      setPendingCount(c); 
+    } catch {} 
+  }, []);
+
   const syncPendingSales = useCallback(async () => {
     try {
       if (!navigator.onLine) return;
@@ -74,7 +81,11 @@ export default function SalesPage() {
         try {
           const res = await fetch("/api/sales", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ invoiceNo: s.invoiceNo, customerName: s.customerName, paymentType: s.paymentType, date: s.date, items: s.items.map((it) => ({ productId: it.productId, productName: it.productName, category: it.category, quantity: it.quantity, sellPrice: it.sellPrice, buyPrice: it.buyPrice, buyPriceAvg: it.buyPriceAvg })), userId: s.userId, localId: s.localId }),
+            body: JSON.stringify({ 
+              invoiceNo: s.invoiceNo, customerName: s.customerName, paymentType: s.paymentType, date: s.date, 
+              items: s.items.map((it) => ({ productId: it.productId, productName: it.productName, category: it.category, quantity: it.quantity, sellPrice: it.sellPrice, buyPrice: it.buyPrice, buyPriceAvg: it.buyPriceAvg })), 
+              userId: s.userId, localId: s.localId 
+            }),
           });
           if (res.ok) await offlineDB.sales.update(s.localId, { synced: 1 });
         } catch {}
@@ -86,11 +97,19 @@ export default function SalesPage() {
   const cacheAllProductsOnce = useCallback(async () => {
     try {
       const res = await fetch(`/api/block-products?search=&category=all&page=1&limit=500`);
-      const data = (await res.json()) as ProductApiResponse; const list = Array.isArray(data) ? data : data.products;
-      const offlineUser = getOfflineUser() as OfflineUser; const userId = offlineUser?._id || offlineUser?.id || "offline";
-      const toCache: OfflineProduct[] = list.map((p) => ({ _id: p._id, localId: p._id, name: p.name, category: p.category, company: "", buyPrice: p.buyPriceAvg || p.buyPrice, buyPriceAvg: p.buyPriceAvg || p.buyPrice, sellPrice: p.sellPrice, stock: p.stock, stockMode: p.stockMode, userId, synced: 1, createdAt: new Date().toISOString(), stockHistory: p.stockHistory || [], lastPurchaseDate: p.lastPurchaseDate }));
-      await offlineDB.products.bulkPut(toCache); alert(`Cached ${toCache.length}`);
-    } catch { alert("Cache failed"); }
+      const data = (await res.json()) as ProductApiResponse; 
+      const list = Array.isArray(data) ? data : data.products;
+      const offlineUser = getOfflineUser() as OfflineUser; 
+      const userId = offlineUser?._id || offlineUser?.id || "offline";
+      const toCache = list.map((p) => ({ 
+        _id: p._id, localId: p._id, name: p.name, category: p.category, company: "", 
+        buyPrice: p.buyPriceAvg || p.buyPrice, buyPriceAvg: p.buyPriceAvg || p.buyPrice, sellPrice: p.sellPrice, stock: p.stock, stockMode: p.stockMode, 
+        userId, synced: 1, createdAt: new Date().toISOString(), stockHistory: p.stockHistory || [], lastPurchaseDate: p.lastPurchaseDate,
+        rairiPerTrolley: p.rairiPerTrolley || 60
+      } as unknown as OfflineProductExtended));
+      await offlineDB.products.bulkPut(toCache as unknown as OfflineProduct[]); 
+      alert(`${toCache.length} پراڈکٹ کیش ہو گئے - No Batch`);
+    } catch { alert("کیش ناکام"); }
   }, []);
 
   useEffect(() => {
@@ -99,18 +118,25 @@ export default function SalesPage() {
       if (productPage === 1) setLoadingProducts(true); else setLoadingMoreProducts(true);
       try {
         if (!navigator.onLine) {
-          const cached = await offlineDB.products.toArray();
+          const cached = await offlineDB.products.toArray() as OfflineProductExtended[];
           const filtered = cached.filter((c) => { const s = productSearch.toLowerCase(); return (!s || c.name.toLowerCase().includes(s)) && (categoryFilter === "all" || c.category === categoryFilter); });
           const LIMIT = 20; const paged = filtered.slice(0, productPage * LIMIT);
-          const mapped: Product[] = paged.map((c) => ({ _id: c._id || c.localId, name: c.name, category: (c.category as BlockCategory) || "other", buyPrice: c.buyPriceAvg || c.buyPrice, buyPriceAvg: c.buyPriceAvg || c.buyPrice, sellPrice: c.sellPrice, stock: c.stock, stockMode: c.stockMode || "limited", stockHistory: c.stockHistory || [], lastPurchaseDate: c.lastPurchaseDate }));
+          const mapped: Product[] = paged.map((c) => ({ 
+            _id: c._id || c.localId, name: c.name, category: (c.category as BlockCategory) || "other", 
+            buyPrice: c.buyPriceAvg || c.buyPrice, buyPriceAvg: c.buyPriceAvg || c.buyPrice, sellPrice: c.sellPrice, stock: c.stock, stockMode: c.stockMode || "limited",
+            rairiPerTrolley: c.rairiPerTrolley || 60
+          }));
           if (!cancelled) { setProducts(mapped); setProductPagination({ page: productPage, totalPages: Math.ceil(filtered.length / LIMIT) || 1, hasMore: filtered.length > paged.length, totalCount: filtered.length }); }
         } else {
           const res = await fetch(`/api/block-products?search=${encodeURIComponent(productSearch)}&category=${categoryFilter}&page=${productPage}&limit=20`);
           const data = (await res.json()) as ProductApiResponse; let list: Product[] = []; let pag: Pagination | undefined;
           if (Array.isArray(data)) list = data; else { list = data.products; pag = data.pagination; }
-          if (list.length > 0) { const offlineUser = getOfflineUser() as OfflineUser; const userId = offlineUser?._id || offlineUser?.id || "offline"; const toCache: OfflineProduct[] = list.map((p) => ({ _id: p._id, localId: p._id, name: p.name, category: p.category, company: "", buyPrice: p.buyPriceAvg || p.buyPrice, buyPriceAvg: p.buyPriceAvg || p.buyPrice, sellPrice: p.sellPrice, stock: p.stock, stockMode: p.stockMode, userId, synced: 1, createdAt: new Date().toISOString(), stockHistory: p.stockHistory || [], lastPurchaseDate: p.lastPurchaseDate })); await offlineDB.products.bulkPut(toCache).catch(() => {}); }
           if (!cancelled) {
-            const mappedList = list.map((p) => ({ _id: p._id, name: p.name, category: p.category as BlockCategory, buyPrice: p.buyPriceAvg || p.buyPrice || 0, buyPriceAvg: p.buyPriceAvg || p.buyPrice || 0, sellPrice: p.sellPrice, stock: p.stock, stockMode: p.stockMode, stockHistory: p.stockHistory || [], lastPurchaseDate: p.lastPurchaseDate }));
+            const mappedList = list.map((p) => ({ 
+              _id: p._id, name: p.name, category: p.category as BlockCategory, 
+              buyPrice: p.buyPriceAvg || p.buyPrice || 0, buyPriceAvg: p.buyPriceAvg || p.buyPrice || 0, sellPrice: p.sellPrice, stock: p.stock, stockMode: p.stockMode,
+              rairiPerTrolley: p.rairiPerTrolley || 60
+            }));
             if (productPage === 1) setProducts(mappedList); else setProducts((prev) => [...prev, ...mappedList]); if (pag) setProductPagination(pag);
           }
         }
@@ -123,16 +149,24 @@ export default function SalesPage() {
     setLoadingSales(true);
     try {
       if (!navigator.onLine) {
-        const all = await offlineDB.sales.orderBy("createdAt").reverse().toArray(); let filtered = all as unknown as Sale[]; const now = new Date();
+        const all = await offlineDB.sales.toArray();
+        let filtered = all as unknown as Sale[]; 
+        const now = new Date();
         if (f === "today") filtered = filtered.filter((s) => new Date(s.createdAt).toDateString() === now.toDateString());
         if (f === "weekly") { const w = new Date(); w.setDate(now.getDate() - 7); filtered = filtered.filter((s) => new Date(s.createdAt) >= w); }
         if (f === "monthly") { const m = new Date(); m.setMonth(now.getMonth() - 1); filtered = filtered.filter((s) => new Date(s.createdAt) >= m); }
+        filtered = filtered.sort((a,b)=> new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         const sliced = filtered.slice((p - 1) * 20, p * 20); if (p === 1) setSales(sliced); else setSales((prev) => [...prev, ...sliced]); setPagination({ page: p, totalPages: Math.ceil(filtered.length / 20), hasMore: filtered.length > p * 20, totalCount: filtered.length });
-      } else { const res = await fetch(`/api/sales?filter=${f}&page=${p}&limit=20`); const data = (await res.json()) as SalesApiResponse; const list = data.sales || []; if (p === 1) setSales(list); else setSales((prev) => [...prev, ...list]); setPagination(data.pagination || { page: p, totalPages: 1, hasMore: false, totalCount: list.length }); }
+      } else { 
+        const res = await fetch(`/api/sales?filter=${f}&page=${p}&limit=20`); 
+        const data = (await res.json()) as SalesApiResponse; 
+        const list = data.sales || []; 
+        if (p === 1) setSales(list); else setSales((prev) => [...prev, ...list]); 
+        setPagination(data.pagination || { page: p, totalPages: 1, hasMore: false, totalCount: list.length }); 
+      }
     } catch {} finally { setLoadingSales(false); }
   }, []);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+// eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void loadSales(filter, page); void refreshCounts(); void syncPendingSales(); }, [filter, page, loadSales, refreshCounts, syncPendingSales]);
 
   const total = sales.reduce((a, b) => a + b.totalSell, 0);
@@ -143,13 +177,12 @@ export default function SalesPage() {
     const num = Number(val); if (isNaN(num)) return; setProducts((prev) => prev.map((p) => p._id === id ? { ...p, sellPrice: rnd(num) } : p));
   };
 
-  // ✅ HYBRID: block = grouped (1500), crush/khaka etc = single-single
   const addToCart = useCallback((p: Product, qty = 1) => {
-    if (p.stockMode === "limited" && p.stock <= 0) { alert(`Out of stock: ${p.name} - Stock 0`); return; }
-    if (paymentType === "udhar") { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("Customer name required for Udhar!"); customerInputRef.current?.focus(); return; } }
+    if (p.stockMode === "limited" && p.stock <= 0) { alert(`اسٹاک ختم: ${p.name} - اسٹاک 0`); return; }
+    if (paymentType === "udhar") { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("ادھار کے لیے گاہک کا نام ضروری ہے!"); customerInputRef.current?.focus(); return; } }
     setCart((prev) => {
       const totalQtyInCart = prev.filter((c) => c.productId === p._id).reduce((s, c) => s + c.qty, 0);
-      if (p.stockMode === "limited" && p.stock < totalQtyInCart + qty) { alert(`Only ${p.stock} left for ${p.name}`); return prev; }
+      if (p.stockMode === "limited" && p.stock < totalQtyInCart + qty) { alert(`صرف ${p.stock} باقی ہے ${p.name} کے لیے`); return prev; }
       if (p.category === "block") {
         const exist = prev.find(c => c.productId === p._id && c.price === p.sellPrice);
         if (exist) return prev.map(c => c.cartId === exist.cartId ? { ...c, qty: c.qty + qty, total: rnd((c.qty + qty) * c.price) } : c);
@@ -168,7 +201,7 @@ export default function SalesPage() {
 
   const checkout = useCallback(async () => {
     if (cart.length === 0 || isProcessing) return;
-    if (paymentType === "udhar") { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("Customer name required for Udhar!"); customerInputRef.current?.focus(); return; } }
+    if (paymentType === "udhar") { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("ادھار کے لیے گاہک کا نام ضروری ہے!"); customerInputRef.current?.focus(); return; } }
     setIsProcessing(true);
     const finalCustomer = customerName.trim() || "Walk-in"; const copy = [...cart]; const now = new Date().toISOString();
     let sessionUserId = ""; try { const res = await fetch("/api/auth/session"); if (res.ok) { const data = await res.json() as SessionRes; sessionUserId = data?.user?.id || data?.user?._id || ""; } } catch {}
@@ -180,15 +213,30 @@ export default function SalesPage() {
 
     try {
       for (const c of copy) {
-        await saveSaleOffline({ productId: c.productId, productName: c.name, category: c.category, quantity: c.qty, buyPrice: c.buyPrice, buyPriceAvg: c.buyPriceAvg, sellPrice: c.price, userId: rawUserId, customerName: finalCustomer, paymentType, date: now, localId: c.cartId, invoiceNo: `${invoiceBase}_${c.cartId.slice(-4)}` });
+        const payload: SaleInput = { 
+          productId: c.productId, productName: c.name, category: c.category, source: "block_product",
+          quantity: c.qty, buyPrice: c.buyPrice, buyPriceAvg: c.buyPriceAvg, sellPrice: c.price, 
+          userId: rawUserId, customerName: finalCustomer, paymentType, date: now, localId: c.cartId, invoiceNo: `${invoiceBase}_${c.cartId.slice(-4)}`,
+          rairiPerTrolley: 60
+        };
+        await saveSaleOffline(payload);
       }
       if (navigator.onLine) {
         for (const c of copy) {
-          try { await fetch("/api/sales", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invoiceNo: `${invoiceBase}_${c.cartId.slice(-4)}`, customerName: finalCustomer, paymentType, date: now, items: [{ productId: c.productId, productName: c.name, category: c.category, quantity: c.qty, sellPrice: c.price, buyPrice: c.buyPriceAvg, buyPriceAvg: c.buyPriceAvg }], userId: sessionUserId || rawUserId, localId: c.cartId }) }); } catch {}
+          try { 
+            await fetch("/api/sales", { 
+              method: "POST", headers: { "Content-Type": "application/json" }, 
+              body: JSON.stringify({ 
+                invoiceNo: `${invoiceBase}_${c.cartId.slice(-4)}`, customerName: finalCustomer, paymentType, date: now,
+                items: [{ productId: c.productId, productName: c.name, category: c.category, quantity: c.qty, sellPrice: c.price, buyPrice: c.buyPriceAvg, buyPriceAvg: c.buyPriceAvg }], 
+                userId: sessionUserId || rawUserId, localId: c.cartId 
+              }) 
+            }); 
+          } catch {}
         }
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Out of stock"; alert(msg);
+      const msg = e instanceof Error ? e.message : "اسٹاک ختم"; alert(msg);
       setSales((prev) => prev.filter((s) => !newSales.find((ns) => ns._id === s._id))); setCart(copy); setIsProcessing(false); return;
     }
     await refreshCounts();
@@ -197,76 +245,73 @@ export default function SalesPage() {
   }, [cart, customerName, paymentType, refreshCounts, isProcessing]);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-2 sm:p-4 max-w-7xl mx-auto">
+    <div className="min-h-screen bg-gray-50 p-2 sm:p-4 max-w-7xl mx-auto" dir="rtl">
       <div className="flex flex-wrap justify-between gap-2 mb-3">
-        <h1 className="font-bold text-[18px]">🧱 Mansoor Block Factory POS {isOffline ? "📶 Offline" : ""} {isProcessing ? "⏳ Processing..." : ""}</h1>
+        <h1 className="font-bold text-[16px]">🧱 منصور بلاک فیکٹری - فروخت - ٹرالی 60 (10000-15000) / ٹرک 800 {isOffline ? "📶 آف لائن" : ""} {isProcessing ? "⏳ جاری ہے..." : ""}</h1>
         <div className="flex gap-2">
-          <span className="bg-green-600 text-white px-3 py-1 rounded-full text-[11px]">Sale Rs.{fmt(total)}</span>
-          <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[11px]">Profit Rs.{fmt(profit)}</span>
-          {pendingCount > 0 && <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-[11px]">{pendingCount} pending</span>}
+          <span className="bg-green-600 text-white px-3 py-1 rounded-full text-[11px]">فروخت {fmt(total)} روپے</span>
+          <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[11px]">منافع {fmt(profit)} روپے</span>
+          {pendingCount > 0 && <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-[11px]">{pendingCount} زیر التواء</span>}
         </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="lg:col-span-2">
           <div className="flex gap-2 mb-2">
-            <input value={productSearch} onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }} placeholder="🔍 Search Block, Crush, Khaka..." className="flex-1 border p-2.5 rounded-xl bg-white text-[13px]" />
+            <input value={productSearch} onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }} placeholder="🔍 بلاک، کرش تلاش کریں..." className="flex-1 border p-2.5 rounded-xl bg-white text-[13px]" />
             <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value as BlockCategory | "all"); setProductPage(1); }} className="border p-2.5 rounded-xl bg-white text-[12px]">
-              <option value="all">All 6 Tabs</option><option value="block">🧱 Block</option><option value="crush">Crush</option><option value="khaka">Khaka</option><option value="bajri">Bajri</option><option value="rait">Rait</option><option value="cement">Cement</option><option value="other">Other</option>
+              <option value="all">سب</option><option value="block">🧱 بلاک</option><option value="crush">کرش</option><option value="khaka">خاکہ</option><option value="bajri">بجری</option><option value="rait">ریت</option><option value="cement">سیمنٹ</option><option value="other">دیگر</option>
             </select>
           </div>
           <div className="flex justify-between items-center mb-2">
-            <p className="text-[10px] text-gray-500">Showing {products.length}/{productPagination.totalCount} blocks/materials</p>
-            {!isOffline && <button onClick={() => void cacheAllProductsOnce()} className="text-[10px] bg-black text-white px-2 py-1 rounded-lg">Cache All for Offline</button>}
+            <p className="text-[10px] text-gray-500">{products.length}/{productPagination.totalCount} پراڈکٹ - ٹرالی 60 ریڑھی</p>
+            {!isOffline && <button onClick={() => void cacheAllProductsOnce()} className="text-[10px] bg-black text-white px-2 py-1 rounded-lg">آف لائن کے لیے کیش کریں</button>}
           </div>
-          {loadingProducts ? <p className="text-center py-6 text-[12px]">Loading...</p> : (
+          {loadingProducts ? <p className="text-center py-6 text-[12px]">لوڈ ہو رہا ہے...</p> : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {products.map((p) => {
                   const qty = qtyMap[p._id] || 1; const buy = p.buyPriceAvg || p.buyPrice; const isOutOfStock = p.stockMode === "limited" && p.stock <= 0;
                   const cartQty = cart.filter((c) => c.productId === p._id).reduce((s, c) => s + c.qty, 0); const remaining = p.stockMode === "limited" ? Math.max(0, p.stock - cartQty) : 999;
+                  const perRairi = p.rairiPerTrolley && p.rairiPerTrolley > 0 ? Number((p.sellPrice / p.rairiPerTrolley).toFixed(2)) : p.sellPrice;
                   return (
                     <div key={p._id} className={`bg-white border rounded-xl p-3 ${isOutOfStock ? "opacity-70 bg-red-50 border-red-200" : ""}`}>
-                      <p className="font-bold text-[13px] truncate">{p.name} {isOutOfStock && <span className="text-red-600 text-[10px] ml-1">● OUT</span>}</p>
-                      <p className="text-[11px] text-gray-500">{p.category} • Stock {p.stockMode === "unlimited" ? "∞" : p.stock} {!isOutOfStock && p.stockMode === "limited" ? `(Left ${remaining})` : ""} • Buy {fmt(buy)}</p>
+                      <p className="font-bold text-[13px] truncate">{p.name} {isOutOfStock && <span className="text-red-600 text-[10px] ml-1">● ختم</span>}</p>
+                      <p className="text-[11px] text-gray-500">{p.category} • {p.rairiPerTrolley || 60} ریڑھی/ٹرالی • اسٹاک {p.stockMode === "unlimited" ? "∞" : p.stock} {!isOutOfStock && p.stockMode === "limited" ? `(باقی ${remaining})` : ""} • فی ریڑھی {perRairi} Rs</p>
                       <div className="flex gap-2 mt-2 items-center">
-                        <span className="text-[11px]">Sell Rs.</span>
+                        <span className="text-[11px]">فروخت</span>
                         <input type="text" inputMode="numeric" value={p.sellPrice === 0 ? "" : p.sellPrice} onChange={(e) => updateProductPrice(p._id, e.target.value)} placeholder="0" className="w-20 border p-1 rounded-lg text-[12px] font-bold bg-yellow-50" disabled={isOutOfStock || isProcessing} />
-                        <span className="text-[10px] text-green-600 font-bold ml-auto">Profit {fmt(p.sellPrice - buy)}</span>
+                        <span className="text-[10px] text-green-600 font-bold ml-auto">منافع {fmt(p.sellPrice - buy)}</span>
                       </div>
                       <div className="flex gap-2 mt-2">
                         <div className="flex border rounded-lg overflow-hidden h-8">
                           <button type="button" onClick={() => setQtyMap({ ...qtyMap, [p._id]: Math.max(1, qty - 1) })} className="px-2 bg-gray-100" disabled={isOutOfStock}>-</button>
                           <input type="text" inputMode="numeric" value={qty} onChange={(e) => { const v = e.target.value; if (v === "") { setQtyMap({ ...qtyMap, [p._id]: 1 }); return; } const n = Number(v); if (!isNaN(n) && n >= 1) setQtyMap({ ...qtyMap, [p._id]: Math.floor(n) }); }} className="w-16 text-center text-[12px] font-bold bg-white" />
-                          <button type="button" onClick={() => { if (p.stockMode === "limited" && qty >= p.stock) { alert(`Only ${p.stock} left`); return; } setQtyMap({ ...qtyMap, [p._id]: qty + 1 }); }} className="px-2 bg-gray-100" disabled={isOutOfStock}>+</button>
+                          <button type="button" onClick={() => { if (p.stockMode === "limited" && qty >= p.stock) { alert(`صرف ${p.stock} باقی ہے`); return; } setQtyMap({ ...qtyMap, [p._id]: qty + 1 }); }} className="px-2 bg-gray-100" disabled={isOutOfStock}>+</button>
                         </div>
-                        <button type="button" onClick={() => addToCart(p, qty)} disabled={isOutOfStock || isProcessing} className={`flex-1 px-3 py-1 rounded-lg text-[11px] font-bold ${isOutOfStock ? "bg-gray-300 text-gray-500" : "bg-black text-white"}`}>{isOutOfStock ? "Out of Stock" : `Add ${qty} x Rs.${fmt(p.sellPrice)}`}</button>
+                        <button type="button" onClick={() => addToCart(p, qty)} disabled={isOutOfStock || isProcessing} className={`flex-1 px-3 py-1 rounded-lg text-[11px] font-bold ${isOutOfStock ? "bg-gray-300 text-gray-500" : "bg-black text-white"}`}>{isOutOfStock ? "اسٹاک ختم" : `${qty} شامل کریں x ${fmt(p.sellPrice)} روپے`}</button>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              {productPagination.hasMore && <button type="button" onClick={() => setProductPage((pr) => pr + 1)} disabled={loadingMoreProducts} className="w-full mt-3 py-2.5 bg-white border rounded-xl text-[13px] font-bold">Load More</button>}
+              {productPagination.hasMore && <button type="button" onClick={() => setProductPage((pr) => pr + 1)} disabled={loadingMoreProducts} className="w-full mt-3 py-2.5 bg-white border rounded-xl text-[13px] font-bold">مزید لوڈ کریں</button>}
             </>
           )}
         </div>
         <div className="space-y-3">
           <div className="bg-white border rounded-xl p-3">
-            <p className="font-bold text-[13px] mb-2">🧱 Cart ({cart.length}) - Rs.{fmt(cartTotal)}</p>
+            <p className="font-bold text-[13px] mb-2">🧱 ٹوکری ({cart.length}) - {fmt(cartTotal)} روپے</p>
             <div className="space-y-1 max-h-60 overflow-y-auto mb-3">
-              {cart.length === 0 ? <p className="text-[11px] text-gray-400 text-center py-4">Cart empty</p> : cart.map((c) => (<div key={c.cartId} className="flex justify-between text-[11px] border-b py-1.5"><span>{c.name} x{c.qty} @ {fmt(c.price)}</span><span className="flex gap-2"><b>Rs.{fmt(c.total)}</b><button type="button" onClick={() => removeFromCart(c.cartId)} className="text-red-600">✕</button></span></div>))}
+              {cart.length === 0 ? <p className="text-[11px] text-gray-400 text-center py-4">ٹوکری خالی ہے</p> : cart.map((c) => (<div key={c.cartId} className="flex justify-between text-[11px] border-b py-1.5"><span>{c.name} x{c.qty} @ {fmt(c.price)}</span><span className="flex gap-2"><b>{fmt(c.total)} روپے</b><button type="button" onClick={() => removeFromCart(c.cartId)} className="text-red-600">✕</button></span></div>))}
             </div>
-            <input ref={customerInputRef} value={customerName} onChange={(e) => { setCustomerName(e.target.value); if (e.target.value.trim().length >= 2) setCustomerError(false); }} placeholder="Customer name for Udhar" className={`w-full border p-2 rounded-lg text-[12px] mb-2 ${customerError ? "border-red-500 bg-red-50 ring-2 ring-red-300" : ""}`} />
-            {customerError && <p className="text-[10px] text-red-600 mb-2 font-bold">* Customer name required for Udhar</p>}
+            <input ref={customerInputRef} value={customerName} onChange={(e) => { setCustomerName(e.target.value); if (e.target.value.trim().length >= 2) setCustomerError(false); }} placeholder="گاہک کا نام - ادھار کے لیے ضروری" className={`w-full border p-2 rounded-lg text-[12px] mb-2 ${customerError ? "border-red-500 bg-red-50 ring-2 ring-red-300" : ""}`} />
+            {customerError && <p className="text-[10px] text-red-600 mb-2 font-bold">* ادھار کے لیے گاہک کا نام ضروری ہے</p>}
             <div className="flex bg-gray-100 rounded-lg p-1 mb-3">
-              <button type="button" onClick={() => { setPaymentType("cash"); setCustomerError(false); }} className={`flex-1 py-1.5 rounded-md text-[11px] font-bold ${paymentType === "cash" ? "bg-green-600 text-white" : "text-gray-600"}`}>Cash</button>
-              <button type="button" onClick={() => { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("Customer name required for Udhar!"); customerInputRef.current?.focus(); return; } setCustomerError(false); setPaymentType("udhar"); }} className={`flex-1 py-1.5 rounded-md text-[11px] font-bold ${paymentType === "udhar" ? "bg-red-600 text-white" : "text-gray-600"}`}>Udhar</button>
+              <button type="button" onClick={() => { setPaymentType("cash"); setCustomerError(false); }} className={`flex-1 py-1.5 rounded-md text-[11px] font-bold ${paymentType === "cash" ? "bg-green-600 text-white" : "text-gray-600"}`}>نقد</button>
+              <button type="button" onClick={() => { const name = customerName.trim(); if (name.length < 2 || name.toLowerCase() === "walk-in") { setCustomerError(true); alert("ادھار کے لیے گاہک کا نام ضروری ہے!"); customerInputRef.current?.focus(); return; } setCustomerError(false); setPaymentType("udhar"); }} className={`flex-1 py-1.5 rounded-md text-[11px] font-bold ${paymentType === "udhar" ? "bg-red-600 text-white" : "text-gray-600"}`}>ادھار</button>
             </div>
-            <button type="button" onClick={() => void checkout()} disabled={cart.length === 0 || isProcessing} className="w-full bg-black text-white py-2.5 rounded-xl font-bold text-[13px] disabled:bg-gray-300">{isProcessing ? "Processing... Please Wait" : paymentType === "udhar" ? `Udhar Rs.${fmt(cartTotal)}` : `Sell Rs.${fmt(cartTotal)} • Profit ${fmt(cartProfit)}`}</button>
-            {pendingCount > 0 && <button type="button" onClick={() => void syncPendingSales()} disabled={isProcessing} className="w-full mt-2 bg-amber-500 text-white py-2 rounded-xl font-bold text-[11px]">Sync {pendingCount} Pending Now</button>}
-          </div>
-          <div className="bg-white border rounded-xl overflow-hidden">
-            <div className="flex gap-1 p-2 border-b bg-gray-50 overflow-x-auto">{(["today", "weekly", "monthly", "all"] as const).map((f) => <button type="button" key={f} onClick={() => { setFilter(f); setPage(1); }} className={`px-3 py-1 rounded-full text-[10px] font-bold capitalize ${filter === f ? "bg-black text-white" : "bg-white border"}`}>{f}</button>)}</div>
-            {loadingSales ? <p className="p-4 text-center text-[11px]">Loading sales...</p> : <div>{sales.map((s) => (<div key={s._id} className={`p-2 border-b flex justify-between text-[11px] ${s.isUdhar ? "bg-red-50" : ""}`}><div><b>{s.invoiceNo}</b> • {s.customerName} • {s.items[0]?.productName || "Blocks"} x{s.totalQuantity}<div className="text-[9px] text-gray-500">{new Date(s.createdAt).toLocaleTimeString()} • Profit {fmt(s.totalProfit)}</div></div><div className="text-right"><div className="font-bold">Rs.{fmt(s.totalSell)}</div><div className={`text-[9px] ${s.isUdhar ? "text-red-600" : "text-green-600"}`}>{s.isUdhar ? "UDHAR" : "Paid"}</div></div></div>))}{pagination.hasMore && <button type="button" onClick={() => setPage((p) => p + 1)} className="w-full py-2 text-[11px] bg-gray-50">Load More</button>}</div>}
+            <button type="button" onClick={() => void checkout()} disabled={cart.length === 0 || isProcessing} className="w-full bg-black text-white py-2.5 rounded-xl font-bold text-[13px] disabled:bg-gray-300">{isProcessing ? "جاری ہے... انتظار کریں" : paymentType === "udhar" ? `ادھار ${fmt(cartTotal)} روپے` : `فروخت ${fmt(cartTotal)} روپے • منافع ${fmt(cartProfit)} روپے`}</button>
+            {pendingCount > 0 && <button type="button" onClick={() => void syncPendingSales()} disabled={isProcessing} className="w-full mt-2 bg-amber-500 text-white py-2 rounded-xl font-bold text-[11px]">{pendingCount} زیر التواء ابھی ہم آہنگ کریں</button>}
           </div>
         </div>
       </div>

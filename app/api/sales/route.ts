@@ -2,6 +2,7 @@ import dbConnect from "@/lib/mongodb";
 import BlockProduct from "@/models/BlockProduct";
 import Sale from "@/models/Sale";
 import Customer from "@/models/Customer";
+import { TrolleyEntryModel, TrolleyStockModel } from "@/models/TrolleyStock";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
@@ -11,10 +12,13 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type SaleItemInput = {
-  productId: string;
+  productId?: string;
+  trolleyEntryId?: string;
   productName?: string;
   category?: string;
+  source?: "block_product" | "trolley";
   quantity: number;
+  rairiQty?: number;
   sellPrice: number;
   buyPrice?: number;
   buyPriceAvg?: number;
@@ -72,6 +76,34 @@ function getDateRange(filter: string): { start: Date; end: Date } | null {
   return { start: startToday, end: endToday };
 }
 
+async function recalcTrolleyStock(userId: Types.ObjectId): Promise<void> {
+  const all = await TrolleyEntryModel.find({ userId }).lean() as unknown as Array<{
+    normalizedMaterial: string; material: string;
+    rairiInTrolley: number; actualRairi?: number;
+    totalUsed?: number; perRairiRate?: number;
+  }>;
+  const map = new Map<string, { rairi: number; cost: number; name: string }>();
+  for (const e of all) {
+    const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
+    if (!norm) continue;
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+    const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    const cur = map.get(norm) ?? { rairi: 0, cost: 0, name: e.material };
+    cur.rairi += rem;
+    cur.cost += rem * Number(e.perRairiRate ?? 0);
+    map.set(norm, cur);
+  }
+  for (const [norm, v] of map) {
+    const avg = v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0;
+    await TrolleyStockModel.updateOne(
+      { userId, normalizedMaterial: norm },
+      { $set: { material: v.name, totalRairi: rnd(v.rairi), totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date() },
+        $setOnInsert: { localId: `stock_${norm}`, userId } },
+      { upsert: true }
+    );
+  }
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getServerSession(authOptions);
@@ -107,7 +139,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const [sales, totalCount, agg] = await Promise.all([
       Sale.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Sale.countDocuments(q),
-      Sale.aggregate([{ $match: q }, { $group: { _id: null, total: { $sum: "$totalSell" }, profit: { $sum: "$totalProfit" } } }]),
+      Sale.aggregate([{ $match: q as Record<string, unknown> }, { $group: { _id: null, total: { $sum: "$totalSell" }, profit: { $sum: "$totalProfit" } } }]),
     ]);
     const firstAgg = agg[0] as { total?: number; profit?: number } | undefined;
     return NextResponse.json({
@@ -144,39 +176,61 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       itemsInput = [{ productId: body.productId, productName: body.productName, category: body.category, quantity: body.quantity, sellPrice: body.sellPrice || 0, buyPrice: body.buyPrice, buyPriceAvg: body.buyPriceAvg }];
     } else return NextResponse.json({ error: "items required" }, { status: 400 });
 
-    // ✅ STEP 1: Validate ALL stock first (no deduction yet)
+    // STEP 1: Validate stock - No batch filter
     const productsToDeduct: Array<{ _id: Types.ObjectId; qty: number }> = [];
+    const trolleyToDeduct: Array<{ localId: string; rairi: number }> = [];
+    
     for (const it of itemsInput) {
-      if (!Types.ObjectId.isValid(it.productId)) continue;
-      const prod = await BlockProduct.findOne({ _id: it.productId, userId }).lean();
-      if (!prod) continue;
-      if (prod.stockMode === "limited" && prod.stock < rnd(it.quantity)) {
-        return NextResponse.json({ error: `Only ${prod.stock} left for ${prod.name} - OUT OF STOCK` }, { status: 400 });
+      if (it.source === "trolley" && it.trolleyEntryId) {
+        const entry = await TrolleyEntryModel.findOne({ localId: it.trolleyEntryId, userId }).lean() as unknown as { rairiInTrolley: number; actualRairi?: number; totalUsed: number; perRairiRate: number } | null;
+        if (!entry) return NextResponse.json({ error: `Trolley entry not found` }, { status: 400 });
+        const remaining = (entry.actualRairi ?? entry.rairiInTrolley) - (entry.totalUsed ?? 0);
+        if (remaining < rnd(it.rairiQty || it.quantity)) {
+          return NextResponse.json({ error: `Only ${remaining} Rairi left` }, { status: 400 });
+        }
+        trolleyToDeduct.push({ localId: it.trolleyEntryId, rairi: rnd(it.rairiQty || it.quantity) });
+      } else if (it.productId && Types.ObjectId.isValid(it.productId)) {
+        const prod = await BlockProduct.findOne({ _id: it.productId, userId }).lean();
+        if (!prod) continue;
+        if (prod.stockMode === "limited" && prod.stock < rnd(it.quantity)) {
+          return NextResponse.json({ error: `Only ${prod.stock} left for ${prod.name}` }, { status: 400 });
+        }
+        if (prod.stockMode === "limited") productsToDeduct.push({ _id: prod._id as Types.ObjectId, qty: rnd(it.quantity) });
       }
-      if (prod.stockMode === "limited") productsToDeduct.push({ _id: prod._id as Types.ObjectId, qty: rnd(it.quantity) });
     }
 
-    // Build final items for Sale
     const finalItems: Array<{
-      productId: Types.ObjectId;
+      productId?: Types.ObjectId;
+      trolleyEntryId?: string;
       productName: string;
       category: string;
+      source: string;
       quantity: number;
+      rairiQty: number;
       sellPrice: number;
       buyPrice: number;
+      totalSell: number;
+      totalProfit: number;
     }> = [];
 
-    let totalQuantity = 0, totalSell = 0, totalProfit = 0;
+    let totalQuantity = 0, totalRairi = 0, totalSell = 0, totalBuy = 0, totalProfit = 0;
 
     for (const it of itemsInput) {
       const qty = rnd(it.quantity);
-      if (qty <= 0) continue;
+      const rairiQty = rnd(it.rairiQty || 0);
+      if (qty <= 0 && rairiQty <= 0) continue;
+      
       let productName = it.productName || "Block";
       let productCategory = it.category || "block";
       let buyPrice = rnd(it.buyPriceAvg || it.buyPrice || 0);
       const sellPrice = rnd(it.sellPrice);
+      const source = it.source || (it.trolleyEntryId ? "trolley" : "block_product");
 
-      if (Types.ObjectId.isValid(it.productId)) {
+      if (source === "trolley" && it.trolleyEntryId) {
+        const entry = await TrolleyEntryModel.findOne({ localId: it.trolleyEntryId, userId }).lean() as unknown as { material: string } | null;
+        if (entry) productName = entry.material;
+        productCategory = "other";
+      } else if (it.productId && Types.ObjectId.isValid(it.productId)) {
         const prod = await BlockProduct.findOne({ _id: it.productId, userId }).lean();
         if (prod) {
           productName = prod.name;
@@ -185,17 +239,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
       }
 
+      const itemTotalSell = source === "trolley" ? rnd(sellPrice * (rairiQty || qty)) : rnd(sellPrice * qty);
+      const itemTotalBuy = rnd(buyPrice * (rairiQty || qty));
+      
       totalQuantity += qty;
-      totalSell += rnd(sellPrice * qty);
-      totalProfit += rnd((sellPrice - buyPrice) * qty);
+      totalRairi += rairiQty;
+      totalSell += itemTotalSell;
+      totalBuy += itemTotalBuy;
+      totalProfit += rnd(itemTotalSell - itemTotalBuy);
 
       finalItems.push({
-        productId: Types.ObjectId.isValid(it.productId) ? new Types.ObjectId(it.productId) : new Types.ObjectId(),
+        productId: it.productId && Types.ObjectId.isValid(it.productId) ? new Types.ObjectId(it.productId) : undefined,
+        trolleyEntryId: it.trolleyEntryId,
         productName,
         category: productCategory,
+        source,
         quantity: qty,
+        rairiQty: rairiQty,
         sellPrice,
         buyPrice,
+        totalSell: itemTotalSell,
+        totalProfit: rnd(itemTotalSell - itemTotalBuy),
       });
     }
 
@@ -216,7 +280,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const saleDate = body.date ? new Date(body.date) : new Date();
 
-    // ✅ STEP 2: Create Sale first
     const sale = await Sale.create({
       invoiceNo,
       customerName,
@@ -224,7 +287,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       village: body.village || "",
       items: finalItems,
       totalQuantity: rnd(totalQuantity),
+      totalRairi: rnd(totalRairi),
       totalSell: rnd(totalSell),
+      totalBuy: rnd(totalBuy),
       totalProfit: rnd(totalProfit),
       paymentType: isUdhar ? "udhar" : "cash",
       isUdhar,
@@ -233,10 +298,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       localId: body.localId || `sale_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     });
 
-    // ✅ STEP 3: Deduct stock only after sale created
     for (const p of productsToDeduct) {
       await BlockProduct.findByIdAndUpdate(p._id, { $inc: { stock: -p.qty } });
     }
+    for (const t of trolleyToDeduct) {
+      await TrolleyEntryModel.updateOne({ localId: t.localId, userId }, { $inc: { totalUsed: t.rairi } });
+    }
+    if (trolleyToDeduct.length > 0) await recalcTrolleyStock(userId);
 
     if (isUdhar) {
       const norm = customerName.toLowerCase();

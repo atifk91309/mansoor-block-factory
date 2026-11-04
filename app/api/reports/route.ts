@@ -3,40 +3,31 @@ import Sale from "@/models/Sale";
 import Customer from "@/models/Customer";
 import BlockProduct from "@/models/BlockProduct";
 import BlockDaily from "@/models/BlockDaily";
+import MonthlyExpense from "@/models/MonthlyExpense";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { Types } from "mongoose";
+import { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type SaleAgg = {
-  count: number;
-  total: number;
-  profit: number;
-  profitPositive: number;
-  profitNegative: number;
-  cash: number;
-  udhar: number;
-  blockCount: number;
+  count: number; total: number; profit: number;
+  profitPositive: number; profitNegative: number;
+  cash: number; udhar: number; blockCount: number;
 };
 
 type KhataAgg = { totalUdhar: number; count: number };
 type StockAgg = { stockValue: number; stockValueSell: number; lowCount: number; totalStock: number };
-type DailyAgg = { totalBlocks: number; totalCement: number; totalWages: number; count: number };
+type DailyAgg = { totalBlocks: number; totalCement: number; totalWages: number; count: number; totalMix: number; totalBill: number };
 
 type SaleMatch = { userId: Types.ObjectId; createdAt?: { $gte: Date; $lt: Date } };
 type EmptySale = {
-  count: number;
-  total: number;
-  profit: number;
-  profitPositive: number;
-  profitNegative: number;
-  buy: number;
-  cash: number;
-  credit: number;
-  blockCount: number;
+  count: number; total: number; profit: number;
+  profitPositive: number; profitNegative: number;
+  buy: number; cash: number; credit: number; blockCount: number;
 };
 
 function emptySale(): EmptySale {
@@ -46,7 +37,7 @@ function emptyStock(): StockAgg {
   return { stockValue: 0, stockValueSell: 0, lowCount: 0, totalStock: 0 };
 }
 function emptyDaily(): DailyAgg {
-  return { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
+  return { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0, totalMix: 0, totalBill: 0 };
 }
 
 function fmtSale(arr: SaleAgg[]): EmptySale {
@@ -55,9 +46,7 @@ function fmtSale(arr: SaleAgg[]): EmptySale {
   const total = Math.round(r.total || 0);
   const profit = Math.round(r.profit || 0);
   return {
-    count: r.count || 0,
-    total,
-    profit,
+    count: r.count || 0, total, profit,
     profitPositive: Math.round(r.profitPositive || 0),
     profitNegative: Math.round(Math.abs(r.profitNegative || 0)),
     buy: Math.max(0, total - profit),
@@ -86,6 +75,8 @@ function fmtDaily(arr: DailyAgg[]): DailyAgg {
     totalCement: Math.round(r.totalCement || 0),
     totalWages: Math.round(r.totalWages || 0),
     count: r.count || 0,
+    totalMix: Math.round((r as unknown as { totalMix: number }).totalMix || 0),
+    totalBill: Math.round((r as unknown as { totalBill: number }).totalBill || 0),
   };
 }
 
@@ -104,20 +95,16 @@ function getPKTRange() {
   return { startTodayUTC, startTomorrowUTC, startMonthUTC, startYearUTC };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
       return NextResponse.json({
-        today: emptySale(),
-        month: emptySale(),
-        year: emptySale(),
-        all: emptySale(),
+        today: emptySale(), month: emptySale(), year: emptySale(), all: emptySale(),
         khata: { totalUdhar: 0, customers: 0, totalWusool: 0, wusoolCustomers: 0 },
         stock: emptyStock(),
         production: { today: emptyDaily(), month: emptyDaily(), all: emptyDaily() },
-        categoryBreakdown: [],
-        todayRecent: [],
+        categoryBreakdown: [], todayRecent: [],
       });
     }
 
@@ -127,7 +114,7 @@ export async function GET() {
 
     const saleAgg = (match: SaleMatch) =>
       Sale.aggregate<SaleAgg>([
-        { $match: match },
+        { $match: match as unknown as Record<string, unknown> },
         {
           $group: {
             _id: null,
@@ -157,7 +144,6 @@ export async function GET() {
         },
       ]);
 
-    // ✅ FIXED: sum blocksCount not blocksMade (blocksMade is now string)
     const dailyAgg = (from: Date, to: Date) =>
       BlockDaily.aggregate<DailyAgg>([
         { $match: { userId, date: { $gte: from, $lt: to } } },
@@ -167,7 +153,9 @@ export async function GET() {
             totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } }, 
             totalCement: { $sum: "$cementBags" }, 
             totalWages: { $sum: "$dailyWages" }, 
-            count: { $sum: 1 } 
+            count: { $sum: 1 },
+            totalMix: { $sum: "$mixCost" },
+            totalBill: { $sum: "$totalBill" },
           } 
         },
       ]);
@@ -181,24 +169,18 @@ export async function GET() {
             totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } }, 
             totalCement: { $sum: "$cementBags" }, 
             totalWages: { $sum: "$dailyWages" }, 
-            count: { $sum: 1 } 
+            count: { $sum: 1 },
+            totalMix: { $sum: "$mixCost" },
+            totalBill: { $sum: "$totalBill" },
           } 
         }
       ]);
 
     const [
-      todaySale,
-      monthSale,
-      yearSale,
-      allSale,
-      khataAgg,
-      wusoolAgg,
-      stockData,
-      todayProd,
-      monthProd,
-      allProd,
-      categoryBreakdown,
-      todayRecent,
+      todaySale, monthSale, yearSale, allSale,
+      khataAgg, wusoolAgg, stockData,
+      todayProd, monthProd, allProd,
+      categoryBreakdown, todayRecent, monthlyExp,
     ] = await Promise.all([
       saleAgg({ userId, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }),
       saleAgg({ userId, createdAt: { $gte: startMonthUTC, $lt: startTomorrowUTC } }),
@@ -212,6 +194,7 @@ export async function GET() {
       allProdAgg(),
       Sale.aggregate([{ $match: { userId } }, { $unwind: "$items" }, { $group: { _id: "$items.category", total: { $sum: { $multiply: ["$items.quantity", "$items.sellPrice"] } }, count: { $sum: 1 }, qty: { $sum: "$items.quantity" } } }, { $sort: { total: -1 } }]),
       Sale.find({ userId, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }).sort({ createdAt: -1 }).limit(8).lean(),
+      MonthlyExpense.find({ userId }).sort({ month: -1 }).lean(),
     ]);
 
     return NextResponse.json({
@@ -233,19 +216,16 @@ export async function GET() {
       },
       categoryBreakdown,
       todayRecent,
+      monthlyExpenses: monthlyExp,
     });
   } catch (err) {
     console.error("GET /api/reports error:", err);
     return NextResponse.json({
-      today: emptySale(),
-      month: emptySale(),
-      year: emptySale(),
-      all: emptySale(),
+      today: emptySale(), month: emptySale(), year: emptySale(), all: emptySale(),
       khata: { totalUdhar: 0, customers: 0, totalWusool: 0, wusoolCustomers: 0 },
       stock: emptyStock(),
       production: { today: emptyDaily(), month: emptyDaily(), all: emptyDaily() },
-      categoryBreakdown: [],
-      todayRecent: [],
+      categoryBreakdown: [], todayRecent: [],
     });
   }
 }
