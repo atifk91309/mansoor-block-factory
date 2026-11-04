@@ -11,11 +11,17 @@ const API_TROLLEY = "/api/trolley-stock";
 type BlockTypeOption = "4 inch" | "5 inch" | "6 inch" | "8 inch";
 type OfflineUser = { _id?: string; id?: string } | null;
 type FormState = { 
-  date: string; cementBags: number; blocksMade: string; blocksCount: number; 
-  blockType: BlockTypeOption; ratePerBlock: number; isMonthlyElectricity: boolean;
+  date: string; 
+  cementBags: number; 
+  cementRate: number; // ✅ FIX: tumhari demand
+  blocksMade: string; 
+  blocksCount: number; 
+  blockType: BlockTypeOption; 
+  ratePerBlock: number; 
+  isMonthlyElectricity: boolean;
 };
 type BlockDailyDoc = {
-  _id: string; localId?: string; date: string; cementBags: number; blocksMade: string; blocksCount: number;
+  _id: string; localId?: string; date: string; cementBags: number; cementRate?: number; blocksMade: string; blocksCount: number;
   dailyWages: number; ratePerBlock: number; blockType: string; userId: string; createdAt: string;
   bills?: BillEntry[]; mixMaterials?: MixMaterialEntry[]; totalBill?: number; mixCost?: number; 
   costPerBlock?: number; isMonthlyElectricity?: boolean;
@@ -37,8 +43,14 @@ function isElectricLabel(label: string): boolean {
 
 export default function BlockDailyPage() {
   const [form, setForm] = useState<FormState>({
-    date: getPKDate(), cementBags: 8, blocksMade: "6 انچ بلاک", blocksCount: 798, 
-    blockType: "6 inch", ratePerBlock: 3, isMonthlyElectricity: false,
+    date: getPKDate(), 
+    cementBags: 17, // ✅ FIX: tumhari demand 17 bori
+    cementRate: 1400, 
+    blocksMade: "6 انچ بلاک", 
+    blocksCount: 798, 
+    blockType: "6 inch", 
+    ratePerBlock: 3, 
+    isMonthlyElectricity: false,
   });
   const [bills, setBills] = useState<BillEntry[]>([{ label: "مزدوری بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]);
   const [newBillLabel, setNewBillLabel] = useState(""); const [newBillAmount, setNewBillAmount] = useState(0);
@@ -60,19 +72,19 @@ export default function BlockDailyPage() {
   }, [bills, wages]);
 
   const { totalBill, mixCost, cementCost } = useMemo(() => {
-  const extra = displayBills.reduce((s, b) => {
-    if (b.label.includes("مزدوری") || b.label.toLowerCase().includes("labour")) return s;
-    if (form.isMonthlyElectricity && isElectricLabel(b.label)) return s;
-    return s + (b.amount || 0);
-  }, 0);
-  const tMix = mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
-  const cCost = rnd(form.cementBags * 1400); // ✅ FIX: model me 1400 hai, 1200 nahi
-  return { 
-    mixCost: tMix, 
-    cementCost: cCost, 
-    totalBill: wages + extra + tMix + cCost // ✅ FIX: cement add
-  };
-}, [displayBills, mixMaterials, wages, form.isMonthlyElectricity, form.cementBags]);
+    const extra = displayBills.reduce((s, b) => {
+      if (b.label.includes("مزدوری") || b.label.toLowerCase().includes("labour")) return s;
+      if (form.isMonthlyElectricity && isElectricLabel(b.label)) return s;
+      return s + (b.amount || 0);
+    }, 0);
+    const tMix = mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
+    const cCost = rnd(form.cementBags * form.cementRate); // ✅ FIX: 17 x 1400
+    return { 
+      mixCost: tMix, 
+      cementCost: cCost, 
+      totalBill: wages + extra + tMix + cCost // ✅ FIX: cement included
+    };
+  }, [displayBills, mixMaterials, wages, form.isMonthlyElectricity, form.cementBags, form.cementRate]);
 
   async function getUserId(): Promise<string> {
     try { 
@@ -88,44 +100,44 @@ export default function BlockDailyPage() {
   }
 
   async function loadHistory(): Promise<void> {
-  const offline = await offlineDB.blockDaily.toArray().catch((): OfflineBlockDaily[] => []);
-  setHistory(offline.sort((a,b)=> b.date.localeCompare(a.date)));
-  try {
-    const res = await fetch(`/api/block-daily`, { cache: "no-store" });
-    if (res.ok) {
-      const j = (await res.json()) as ApiResponse;
-      const data = j.data ?? j.blockDailies ?? [];
-      if (data.length > 0) {
-        const mapped: OfflineBlockDaily[] = data.map((d) => ({
-          localId: d.localId || d._id || `daily_${d._id}`,
-          _id: d._id,
-          date: new Date(d.date).toISOString().split("T")[0],
-          cementBags: d.cementBags, // ✅ sirf 1 dafa
-          cementRate: 1400,
-          cementCost: d.cementBags * 1400,
-          blocksMade: d.blocksMade,
-          blocksCount: d.blocksCount,
-          dailyWages: d.dailyWages,
-          ratePerBlock: d.ratePerBlock,
-          mazdoorRatePerBlock: d.ratePerBlock,
-          labourCost: d.dailyWages,
-          blockType: d.blockType,
-          userId: d.userId,
-          synced: 1,
-          createdAt: d.createdAt,
-          bills: d.bills || [],
-          mixMaterials: d.mixMaterials || [],
-          totalBill: d.totalBill || d.dailyWages,
-          mixCost: d.mixCost || 0,
-          trolleyMixCost: d.mixCost || 0,
-          costPerBlock: d.costPerBlock || 0,
-          isMonthlyElectricity: d.isMonthlyElectricity || false,
-        } as OfflineBlockDaily));
-        setHistory(mapped.sort((a,b) => b.date.localeCompare(a.date)));
+    const offline = await offlineDB.blockDaily.toArray().catch((): OfflineBlockDaily[] => []);
+    setHistory(offline.sort((a,b)=> b.date.localeCompare(a.date)));
+    try {
+      const res = await fetch(`/api/block-daily`, { cache: "no-store" });
+      if (res.ok) {
+        const j = (await res.json()) as ApiResponse;
+        const data = j.data ?? j.blockDailies ?? [];
+        if (data.length > 0) {
+          const mapped: OfflineBlockDaily[] = data.map((d) => ({
+            localId: d.localId || d._id || `daily_${d._id}`,
+            _id: d._id,
+            date: new Date(d.date).toISOString().split("T")[0],
+            cementBags: d.cementBags,
+            cementRate: d.cementRate || 1400,
+            cementCost: (d.cementBags || 0) * (d.cementRate || 1400),
+            blocksMade: d.blocksMade,
+            blocksCount: d.blocksCount,
+            dailyWages: d.dailyWages,
+            ratePerBlock: d.ratePerBlock,
+            mazdoorRatePerBlock: d.ratePerBlock,
+            labourCost: d.dailyWages,
+            blockType: d.blockType,
+            userId: d.userId,
+            synced: 1,
+            createdAt: d.createdAt,
+            bills: d.bills || [],
+            mixMaterials: d.mixMaterials || [],
+            totalBill: d.totalBill || d.dailyWages,
+            mixCost: d.mixCost || 0,
+            trolleyMixCost: d.mixCost || 0,
+            costPerBlock: d.costPerBlock || 0,
+            isMonthlyElectricity: d.isMonthlyElectricity || false,
+          } as OfflineBlockDaily));
+          setHistory(mapped.sort((a,b) => b.date.localeCompare(a.date)));
+        }
       }
-    }
-  } catch {}
-}
+    } catch {}
+  }
 
   useEffect(() => {
     async function load(): Promise<void> {
@@ -185,10 +197,20 @@ export default function BlockDailyPage() {
     try {
       const userId = await getUserId();
       const payload = { 
-        date: form.date, cementBags: form.cementBags, blocksMade: form.blocksMade, blocksCount: form.blocksCount, 
-        blockType: form.blockType, ratePerBlock: form.ratePerBlock, isMonthlyElectricity: form.isMonthlyElectricity, 
-        dailyWages: wages, bills: displayBills.filter(b => b.label.trim()), mixMaterials, 
-        totalBill, mixCost, cementCost, labourCost: wages, costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0,
+        date: form.date, 
+        cementBags: form.cementBags, 
+        cementRate: form.cementRate, 
+        cementCost,
+        blocksMade: form.blocksMade, 
+        blocksCount: form.blocksCount, 
+        blockType: form.blockType, 
+        ratePerBlock: form.ratePerBlock, 
+        isMonthlyElectricity: form.isMonthlyElectricity, 
+        dailyWages: wages, 
+        bills: displayBills.filter(b => b.label.trim()), 
+        mixMaterials, 
+        totalBill, mixCost, labourCost: wages, 
+        costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0,
         userId 
       };
       if (editingId && editingLocalId) {
@@ -223,7 +245,16 @@ export default function BlockDailyPage() {
   }
 
   function handleEdit(item: OfflineBlockDaily): void {
-    setForm({ date: item.date, cementBags: item.cementBags, blocksMade: item.blocksMade, blocksCount: item.blocksCount, blockType: item.blockType as BlockTypeOption, ratePerBlock: item.ratePerBlock, isMonthlyElectricity: item.isMonthlyElectricity || false });
+    setForm({ 
+      date: item.date, 
+      cementBags: item.cementBags, 
+      cementRate: (item as unknown as { cementRate?: number }).cementRate || 1400,
+      blocksMade: item.blocksMade, 
+      blocksCount: item.blocksCount, 
+      blockType: item.blockType as BlockTypeOption, 
+      ratePerBlock: item.ratePerBlock, 
+      isMonthlyElectricity: item.isMonthlyElectricity || false 
+    });
     setBills(item.bills && item.bills.length > 0 ? item.bills : [{ label: "مزدوری بل", amount: item.dailyWages }]); 
     setMixMaterials(item.mixMaterials || []);
     setEditingId(item._id || item.localId); setEditingLocalId(item.localId); window.scrollTo({ top: 0, behavior: "smooth" });
@@ -287,8 +318,9 @@ export default function BlockDailyPage() {
               <select value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-white">{blockOptions.map((name, idx) => (<option key={`${name}-${idx}`} value={name}>{name}</option>))}</select>
               <input type="text" placeholder="یا نیا نام لکھیں" value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-1.5" />
             </div>
-            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
               <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">سیمنٹ بوری</label><input type="number" value={form.cementBags} onChange={(e)=>setForm({...form,cementBags:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
+              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">بوری ریٹ</label><input type="number" value={form.cementRate} onChange={(e)=>setForm({...form,cementRate:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
               <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">فی بلاک ریٹ</label><input type="number" value={form.ratePerBlock} onChange={(e)=>setForm({...form,ratePerBlock:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
             </div>
             <div className="border-t pt-2">
@@ -338,7 +370,7 @@ export default function BlockDailyPage() {
               <div className="flex gap-1.5 mt-0.5"><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:Math.max(0,f.blocksCount-1)}))} className="px-3 py-1.5 border rounded-lg font-bold bg-gray-100 text-[11px]">-1</button><input type="number" value={form.blocksCount} onChange={(e)=>setForm({...form,blocksCount:Number(e.target.value)})} className="flex-1 border p-1.5 rounded-lg text-center font-bold text-[12px] sm:text-[13px]" /><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:f.blocksCount+1}))} className="px-3 py-1.5 border rounded-lg font-bold bg-gray-100 text-[11px]">+1</button></div>
             </div>
             <div className="bg-[#0f4fb8]/10 p-2 rounded-lg border text-[10px] sm:text-[11px] font-bold">
-              مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} روپے | سیمنٹ: {cementCost} روپے | مکس: {mixCost} روپے | کل بل: {totalBill} روپے | فی بلاک: {form.blocksCount>0 ? (totalBill/form.blocksCount).toFixed(2) : 0} روپے
+              مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} روپے | سیمنٹ: {form.cementBags} x {form.cementRate} = {cementCost} روپے | مکس: {mixCost} روپے | کل بل: {totalBill} روپے | فی بلاک: {form.blocksCount>0 ? (totalBill/form.blocksCount).toFixed(2) : 0} روپے
             </div>
             <button onClick={()=>void handleSubmit()} disabled={saving} className="w-full bg-black text-white p-2.5 sm:p-3 rounded-xl font-bold text-[11px] sm:text-[12px]">{saving ? "محفوظ ہو رہا ہے..." : editingId ? `اپڈیٹ کریں` : `${form.blocksCount} بلاک محفوظ کریں`}</button>
             {editingId && <button onClick={()=>{ setEditingId(null); setEditingLocalId(null); setForm((f)=>({...f, date: getPKDate(), blocksCount:798})); setBills([{label:"مزدوری بل", amount:wages},{label:"دوپہر کا کھانا", amount:0}]); setMixMaterials([]); }} className="w-full border p-2 rounded-xl text-[10px] font-bold">منسوخ کریں</button>}
