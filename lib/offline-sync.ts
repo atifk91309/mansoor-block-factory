@@ -209,7 +209,7 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     .filter(b => b.label && b.label.trim().length > 0)
     .map(b => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
 
-  const cleanMix: MixMaterialEntry[] = (data.mixMaterials || [])
+  let cleanMix: MixMaterialEntry[] = (data.mixMaterials || [])
     .filter(m => m.label && m.label.trim().length > 0 && (m.rairi || 0) > 0)
     .map(m => {
       const rairi = rnd(m.rairi || 0);
@@ -223,6 +223,21 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
         trolleyEntryId: m.trolleyEntryId?.trim() || "",
       };
     });
+
+  // FIX: merge duplicate khaka 55R + khaka 61R => 116R
+  const mergedMap = new Map<string, MixMaterialEntry>();
+  for (const m of cleanMix) {
+    const norm = m.label.toLowerCase().trim();
+    const exist = mergedMap.get(norm);
+    if (exist) {
+      exist.rairi = rnd(exist.rairi + m.rairi);
+      exist.amount = rnd(exist.amount + m.amount);
+      exist.qty = `${exist.rairi} Rairi`;
+    } else {
+      mergedMap.set(norm, { ...m });
+    }
+  }
+  cleanMix = Array.from(mergedMap.values());
 
   const extraBills = cleanBills.reduce((sum, b) => {
     if (b.label.toLowerCase().includes("labour")) return sum;
@@ -256,41 +271,49 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     await offlineDB.blockDaily.put(daily);
     await offlineDB.syncQueue.put({ type: "blockDaily", localId, payload: daily, createdAt: new Date(), attempts: 0 });
 
+    // DEDUCT USED - FIXED (no avgRate bug)
     for (const m of cleanMix) {
       if (m.rairi <= 0) continue;
-      const norm = m.label.toLowerCase().trim();
-      
-      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
-      if (stock) {
-        const newRairi = rnd(stock.totalRairi - m.rairi);
-        const costDeduct = rnd(m.rairi * stock.avgRate);
-        await offlineDB.trolleyStock.update(stock.localId, {
-          totalRairi: newRairi < 0 ? 0 : newRairi,
-          totalCost: rnd(stock.totalCost - costDeduct),
-          updatedAt: nowISO,
+      let entry: OfflineTrolleyEntry | undefined;
+      if (m.trolleyEntryId) {
+        entry = await offlineDB.trolleyEntries.get(m.trolleyEntryId);
+        if (!entry) entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
+      }
+      if (!entry) {
+        const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
+        entry = all.filter(e => e.status === "OPEN").sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+      }
+      if (entry) {
+        await offlineDB.trolleyEntries.update(entry.localId, {
+          totalUsed: rnd((entry.totalUsed || 0) + m.rairi),
           synced: 0,
         });
       }
+    }
 
-      if (m.trolleyEntryId) {
-        const entry = await offlineDB.trolleyEntries.get(m.trolleyEntryId);
-        if (entry) {
-          await offlineDB.trolleyEntries.update(m.trolleyEntryId, {
-            totalUsed: rnd((entry.totalUsed || 0) + m.rairi),
-            synced: 0,
-          });
-        }
-      } else {
-        const openEntry = await offlineDB.trolleyEntries
-          .where("normalizedMaterial").equals(norm)
-          .filter(e => e.status === "OPEN")
-          .first();
-        if (openEntry) {
-          await offlineDB.trolleyEntries.update(openEntry.localId, {
-            totalUsed: rnd((openEntry.totalUsed || 0) + m.rairi),
-            synced: 0,
-          });
-        }
+    // FULL STOCK RECALC - FIXES Avg 0 bug
+    const allEntries = await offlineDB.trolleyEntries.toArray();
+    const stockMap = new Map<string, { rairi: number; cost: number }>();
+    for (const e of allEntries) {
+      const norm = e.normalizedMaterial;
+      const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+      const rem = Math.max(0, eff - rnd(e.totalUsed || 0));
+      const cur = stockMap.get(norm) ?? { rairi: 0, cost: 0 };
+      cur.rairi += rem;
+      cur.cost += rem * Number(e.perRairiRate || 0);
+      stockMap.set(norm, cur);
+    }
+    for (const [norm, v] of stockMap) {
+      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
+      if (stock) {
+        const avg = v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0;
+        await offlineDB.trolleyStock.update(stock.localId, {
+          totalRairi: rnd(v.rairi),
+          totalCost: rnd(v.cost),
+          avgRate: avg,
+          updatedAt: nowISO,
+          synced: 0,
+        });
       }
     }
 
@@ -318,6 +341,60 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
   });
 
   return localId;
+}
+
+// NEW: DELETE + REVERT Used 116 -> 0
+export async function deleteBlockDailyOffline(localId: string): Promise<void> {
+  const daily = await offlineDB.blockDaily.get(localId);
+  if (!daily) return;
+  const nowISO = new Date().toISOString();
+  
+  await offlineDB.transaction("rw", offlineDB.blockDaily, offlineDB.trolleyEntries, offlineDB.trolleyStock, offlineDB.syncQueue, async () => {
+    for (const m of daily.mixMaterials) {
+      const rairi = rnd(m.rairi);
+      if (rairi <= 0) continue;
+      let entry: OfflineTrolleyEntry | undefined;
+      if (m.trolleyEntryId) {
+        entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
+      }
+      if (!entry) {
+        const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
+        entry = all.filter(e => (e.totalUsed || 0) >= 1).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+      }
+      if (entry) {
+        await offlineDB.trolleyEntries.update(entry.localId, {
+          totalUsed: Math.max(0, rnd(entry.totalUsed - rairi)),
+          synced: 0,
+        });
+      }
+    }
+    // recalc after revert
+    const allEntries = await offlineDB.trolleyEntries.toArray();
+    const stockMap = new Map<string, { rairi: number; cost: number }>();
+    for (const e of allEntries) {
+      const norm = e.normalizedMaterial;
+      const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+      const rem = Math.max(0, eff - rnd(e.totalUsed || 0));
+      const cur = stockMap.get(norm) ?? { rairi: 0, cost: 0 };
+      cur.rairi += rem;
+      cur.cost += rem * Number(e.perRairiRate || 0);
+      stockMap.set(norm, cur);
+    }
+    for (const [norm, v] of stockMap) {
+      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
+      if (stock) {
+        await offlineDB.trolleyStock.update(stock.localId, {
+          totalRairi: rnd(v.rairi),
+          totalCost: rnd(v.cost),
+          avgRate: v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0,
+          updatedAt: nowISO,
+          synced: 0,
+        });
+      }
+    }
+    await offlineDB.blockDaily.delete(localId);
+    await offlineDB.syncQueue.where("localId").equals(localId).delete();
+  });
 }
 
 export async function saveMonthlyExpenseOffline(data: MonthlyExpenseInput): Promise<string> {

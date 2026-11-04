@@ -417,7 +417,6 @@ export class OfflineDB extends Dexie {
       });
     });
 
-    // V14 - FIX totalUsed + ensure trolley tables fully indexed for auto-deduct
     this.version(14).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
       sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
@@ -442,6 +441,26 @@ export class OfflineDB extends Dexie {
         if (s["totalRairi"] === undefined) s["totalRairi"] = rnd(Number(s["rairiInTrolley"]) || 0);
       });
     });
+
+    this.version(15).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
+      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date, totalUsed",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt, updatedAt",
+      blockTypes: null,
+      categories: null,
+    }).upgrade(async (tx) => {
+      const entries = tx.table("trolleyEntries");
+      await entries.toCollection().modify((t: Record<string, unknown>) => {
+        if (t["totalUsed"] === undefined || t["totalUsed"] === null) t["totalUsed"] = 0;
+        const eff = rnd(Number(t["actualRairi"] ?? t["rairiInTrolley"]) || 0);
+        if (rnd(Number(t["totalUsed"]) || 0) > eff) t["totalUsed"] = eff;
+      });
+    });
   }
 }
 
@@ -453,6 +472,70 @@ export function calcProfit(sellPrice: number, buyPriceAvg: number, qty: number):
 }
 export function calcTotal(sellPrice: number, qty: number): number {
   return rnd(rnd(sellPrice) * rnd(qty));
+}
+
+// FIX: merge duplicate khaka 55R + 61R offline
+export function mergeMixMaterialsOffline(mixes: MixMaterialEntry[]): MixMaterialEntry[] {
+  const map = new Map<string, MixMaterialEntry>();
+  for (const m of mixes) {
+    const norm = m.label.toLowerCase().trim();
+    const exist = map.get(norm);
+    if (exist) {
+      exist.rairi = rnd(exist.rairi + m.rairi);
+      exist.amount = rnd(exist.amount + m.amount);
+      exist.qty = `${exist.rairi} Rairi`;
+    } else {
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} Rairi` });
+    }
+  }
+  return Array.from(map.values());
+}
+
+export async function deductTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
+  for (const m of mixes) {
+    const rairi = rnd(m.rairi);
+    if (rairi <= 0) continue;
+    let entry: OfflineTrolleyEntry | undefined;
+    if (m.trolleyEntryId) {
+      entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
+    }
+    if (!entry) {
+      const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
+      entry = all.filter(e => e.status === "OPEN").sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+    }
+    if (entry) {
+      await offlineDB.trolleyEntries.update(entry.localId, { totalUsed: rnd(entry.totalUsed + rairi), synced: 0 });
+      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(entry.normalizedMaterial).first();
+      if (stock) {
+        const newRairi = Math.max(0, rnd(stock.totalRairi - rairi));
+        await offlineDB.trolleyStock.update(stock.localId, { totalRairi: newRairi, updatedAt: new Date().toISOString(), synced: 0 });
+      }
+    }
+  }
+}
+
+export async function revertTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
+  for (const m of mixes) {
+    const rairi = rnd(m.rairi);
+    if (rairi <= 0) continue;
+    let entry: OfflineTrolleyEntry | undefined;
+    if (m.trolleyEntryId) {
+      entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
+    }
+    if (!entry) {
+      const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
+      entry = all.filter(e => (e.totalUsed || 0) >= 1).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    }
+    if (entry) {
+      const newUsed = Math.max(0, rnd(entry.totalUsed - rairi));
+      await offlineDB.trolleyEntries.update(entry.localId, { totalUsed: newUsed, synced: 0 });
+      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(entry.normalizedMaterial).first();
+      if (stock) {
+        const newRairi = rnd(stock.totalRairi + rairi);
+        await offlineDB.trolleyStock.update(stock.localId, { totalRairi: newRairi, updatedAt: new Date().toISOString(), synced: 0 });
+      }
+    }
+  }
 }
 
 export async function upsertOfflineCustomer(sale: OfflineSale, village = "", phone = ""): Promise<string | null> {

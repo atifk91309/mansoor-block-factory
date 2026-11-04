@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { offlineDB } from "@/lib/offline-db";
-import { saveBlockDailyOffline, BlockDailyInput } from "@/lib/offline-sync";
+import { saveBlockDailyOffline, deleteBlockDailyOffline, BlockDailyInput } from "@/lib/offline-sync";
 import { getOfflineUser } from "@/lib/offline-auth";
 import type { OfflineBlockDaily, BillEntry, MixMaterialEntry, OfflineTrolleyStock } from "@/lib/offline-db";
 import * as XLSX from "xlsx";
@@ -19,6 +19,7 @@ type BlockDailyDoc = {
   costPerBlock?: number; isMonthlyElectricity?: boolean;
 };
 type ApiResponse = { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[]; };
+type SessionResponse = { user?: { id?: string; _id?: string } };
 
 const DEFAULT_BLOCKS = ["Shaga Block", "Full crush Block", "Mix Crush Block", "One khahta", "3Number Khahta", "Concar Khahta", "mix crush Block"];
 
@@ -114,8 +115,16 @@ export default function BlockDailyPage() {
   }, []);
 
   async function getUserId(): Promise<string> {
-    try { const res = await fetch("/api/auth/session"); if (res.ok) { const data = (await res.json()) as { user?: { id?: string; _id?: string } }; if (data?.user?.id) return data.user.id; if (data?.user?._id) return data.user._id; } } catch {}
-    const offlineUser = getOfflineUser() as OfflineUser; return offlineUser?._id || offlineUser?.id || "offline_user";
+    try { 
+      const res = await fetch("/api/auth/session"); 
+      if (res.ok) { 
+        const data = (await res.json()) as SessionResponse; 
+        if (data?.user?.id) return data.user.id; 
+        if (data?.user?._id) return data.user._id; 
+      } 
+    } catch {}
+    const offlineUser = getOfflineUser() as OfflineUser; 
+    return offlineUser?._id || offlineUser?.id || "offline_user";
   }
 
   const addBill = (): void => { if (!newBillLabel.trim()) return; setBills([...displayBills, { label: newBillLabel.trim(), amount: rnd(newBillAmount || 0) }]); setNewBillLabel(""); setNewBillAmount(0); };
@@ -151,15 +160,40 @@ export default function BlockDailyPage() {
         totalBill, mixCost, userId 
       };
       if (editingId && editingLocalId) {
-        if (navigator.onLine) { await fetch(`/api/block-daily/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
-        await offlineDB.blockDaily.update(editingLocalId, { date: form.date, cementBags: rnd(form.cementBags), blocksMade: form.blocksMade, blocksCount: rnd(form.blocksCount), blockType: form.blockType, ratePerBlock: rnd(form.ratePerBlock), dailyWages: wages, bills: displayBills, mixMaterials, totalBill, mixCost, costPerBlock: form.blocksCount > 0 ? Math.round((totalBill/form.blocksCount)*100)/100 : 0, isMonthlyElectricity: form.isMonthlyElectricity, synced: navigator.onLine ? 1 : 0 });
+        // EDIT: revert old + save new
+        try {
+          await deleteBlockDailyOffline(editingLocalId);
+        } catch {
+          await offlineDB.blockDaily.delete(editingLocalId);
+        }
+        if (navigator.onLine) {
+          try {
+            await fetch(`/api/block-daily/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          } catch {}
+        }
+        const newLocalId = await saveBlockDailyOffline({ ...payload, localId: editingLocalId });
+        if (navigator.onLine) {
+          try {
+            const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId: newLocalId }) });
+            if (res.ok) await offlineDB.blockDaily.update(newLocalId, { synced: 1 });
+          } catch {}
+        }
         setEditingId(null); setEditingLocalId(null);
       } else {
         const localId = await saveBlockDailyOffline(payload);
-        if (navigator.onLine) { try { const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId }) }); if (res.ok) await offlineDB.blockDaily.update(localId, { synced: 1 }); } catch {} }
+        if (navigator.onLine) { 
+          try { 
+            const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId }) }); 
+            if (res.ok) await offlineDB.blockDaily.update(localId, { synced: 1 }); 
+          } catch {} 
+        }
       }
-      await loadHistory(); setForm((f) => ({ ...f, date: getPKDate(), blocksCount: 798 }));
-      setBills([{ label: "Labour Bill", amount: wages }, { label: "Lunch Bill", amount: 0 }]); setMixMaterials([]);
+      await loadHistory(); 
+      const stocks = await offlineDB.trolleyStock.toArray();
+      setTrolleyStocks(stocks);
+      setForm((f) => ({ ...f, date: getPKDate(), blocksCount: 798 }));
+      setBills([{ label: "Labour Bill", amount: wages }, { label: "Lunch Bill", amount: 0 }]); 
+      setMixMaterials([]);
     } finally { setSaving(false); }
   }
 
@@ -169,11 +203,25 @@ export default function BlockDailyPage() {
     setMixMaterials(item.mixMaterials || []);
     setEditingId(item._id || item.localId); setEditingLocalId(item.localId); window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
   async function handleDelete(item: OfflineBlockDaily): Promise<void> {
     if (!confirm(`Delete ${item.blocksMade} - ${item.blocksCount}?`)) return;
-    await offlineDB.blockDaily.delete(item.localId);
-    if (navigator.onLine && item._id) { try { await fetch(`/api/block-daily/${item._id}`, { method: "DELETE" }); } catch {} }
+    try {
+      await deleteBlockDailyOffline(item.localId);
+    } catch {
+      await offlineDB.blockDaily.delete(item.localId);
+    }
+    if (navigator.onLine && item._id) {
+      try {
+        const userId = await getUserId();
+        await fetch(`/api/block-daily/${item._id}?userId=${userId}`, { method: "DELETE" });
+      } catch {}
+    }
     setHistory((h) => h.filter((x) => x.localId !== item.localId));
+    try {
+      const stocks = await offlineDB.trolleyStock.toArray();
+      setTrolleyStocks(stocks);
+    } catch {}
   }
 
   function exportExcel(): void {

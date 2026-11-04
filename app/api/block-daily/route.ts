@@ -12,40 +12,67 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type BillBody = { label: string; amount: number };
-type MixBody = {
-  label: string;
-  qty?: string;
-  rairi: number;
-  rate: number;
-  amount?: number;
-  trolleyEntryId?: string;
-};
+type MixBody = { label: string; qty?: string; rairi: number; rate: number; amount?: number; trolleyEntryId?: string };
 type BlockDailyBody = {
-  localId?: string;
-  userId?: string;
-  date?: string;
-  cementBags?: number;
-  blocksMade?: string;
-  blocksCount?: number;
-  dailyWages?: number;
-  ratePerBlock?: number;
-  blockType?: string;
-  bills?: BillBody[];
-  mixMaterials?: MixBody[];
-  isMonthlyElectricity?: boolean;
+  localId?: string; userId?: string; date?: string; cementBags?: number; blocksMade?: string;
+  blocksCount?: number; dailyWages?: number; ratePerBlock?: number; blockType?: string;
+  bills?: BillBody[]; mixMaterials?: MixBody[]; isMonthlyElectricity?: boolean;
 };
 
-function rnd(n: number): number {
-  return Math.round(n || 0);
+function rnd(n: number): number { return Math.round(Number(n) || 0); }
+function getUserFilter(userId: string): Record<string, unknown> {
+  if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  return { userId: userId };
 }
 
-function getUserFilter(userId: string): Record<string, unknown> {
-  if (Types.ObjectId.isValid(userId)) {
-    return {
-      $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }],
-    };
+function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
+  const map = new Map<string, MixBody>();
+  for (const m of mixes) {
+    const norm = m.label.toLowerCase().trim();
+    const exist = map.get(norm);
+    if (exist) {
+      exist.rairi = rnd(exist.rairi + m.rairi);
+      exist.amount = rnd((exist.amount ?? 0) + (m.amount ?? 0));
+      exist.qty = `${exist.rairi} Rairi`;
+    } else {
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} Rairi` });
+    }
   }
-  return { userId: userId };
+  return Array.from(map.values());
+}
+
+async function recalcAllStocks(userId: string): Promise<void> {
+  const all = await TrolleyEntryModel.find({ ...getUserFilter(userId) }).lean() as unknown as Array<{
+    material: string;
+    normalizedMaterial: string;
+    rairiInTrolley: number;
+    actualRairi?: number;
+    totalUsed?: number;
+    perRairiRate?: number;
+  }>;
+  const map = new Map<string, { rairi: number; cost: number }>();
+  for (const e of all) {
+    const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
+    if (!norm) continue;
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+    const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
+    cur.rairi += rem;
+    cur.cost += rem * Number(e.perRairiRate ?? 0);
+    map.set(norm, cur);
+  }
+  for (const [norm, v] of map) {
+    const avg = v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0;
+    const matName = all.find((e) => String(e.normalizedMaterial || "").toLowerCase().trim() === norm)?.material || norm;
+    await TrolleyStockModel.updateOne(
+      { ...getUserFilter(userId), normalizedMaterial: norm },
+      {
+        $set: { material: matName, totalRairi: rnd(v.rairi), totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date() },
+        $setOnInsert: { localId: `stock_${norm}`, userId },
+      },
+      { upsert: true }
+    );
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -54,20 +81,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId") || session?.user?.id;
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
-
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-
   const baseFilter = getUserFilter(userId);
-  const dateFilter: Record<string, unknown> = from && to
-    ? { date: { $gte: new Date(from), $lte: new Date(to) } }
-    : {};
-
-  const data = await BlockDaily.find({
-    ...baseFilter,
-    ...dateFilter,
-  }).sort({ date: -1 }).limit(500).lean();
-
+  const dateFilter: Record<string, unknown> = from && to ? { date: { $gte: new Date(from), $lte: new Date(to) } } : {};
+  const data = await BlockDaily.find({ ...baseFilter, ...dateFilter }).sort({ date: -1 }).limit(500).lean();
   return NextResponse.json({ data, blockDailies: data });
 }
 
@@ -77,25 +95,20 @@ export async function POST(req: NextRequest) {
   const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
   const userId = body.userId || session?.user?.id;
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
-
-  if (!body.blocksMade?.trim()) {
-    return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
-  }
+  if (!body.blocksMade?.trim()) return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
 
   const rate = rnd(body.ratePerBlock || 3);
   const count = rnd(body.blocksCount || 0);
   if (count <= 0) return NextResponse.json({ error: "blocksCount > 0 required" }, { status: 400 });
-  
+
   const wages = rnd(body.dailyWages || count * rate);
   const name = body.blocksMade.trim();
 
-  const cleanBills = (body.bills || [])
-    .filter((b) => b.label?.trim())
-    .map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
+  const cleanBills = (body.bills || []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
 
-  const cleanMix = (body.mixMaterials || [])
+  let cleanMix: MixBody[] = (body.mixMaterials || [])
     .filter((m) => m.label?.trim() && (m.rairi || 0) > 0)
-    .map((m) => {
+    .map((m): MixBody => {
       const rairi = rnd(m.rairi || 0);
       const ratePerRairi = rnd(m.rate || 0);
       return {
@@ -107,6 +120,7 @@ export async function POST(req: NextRequest) {
         trolleyEntryId: m.trolleyEntryId?.trim(),
       };
     });
+  cleanMix = mergeSameMaterial(cleanMix);
 
   const extraBills = cleanBills.reduce((sum, b) => {
     if (b.label.toLowerCase().includes("labour")) return sum;
@@ -115,101 +129,51 @@ export async function POST(req: NextRequest) {
   }, 0);
   const mixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
   const totalBill = wages + extraBills + mixCost;
-
   const dailyDate = body.date ? new Date(body.date) : new Date();
 
   const daily = await BlockDaily.create({
-    date: dailyDate,
-    cementBags: rnd(body.cementBags || 0),
-    blocksMade: name,
-    blocksCount: count,
-    dailyWages: wages,
-    ratePerBlock: rate,
-    blockType: body.blockType || "6 inch",
-    userId,
-    bills: cleanBills,
-    mixMaterials: cleanMix,
-    totalBill,
-    mixCost,
+    date: dailyDate, cementBags: rnd(body.cementBags || 0), blocksMade: name, blocksCount: count,
+    dailyWages: wages, ratePerBlock: rate, blockType: body.blockType || "6 inch", userId,
+    bills: cleanBills, mixMaterials: cleanMix, totalBill, mixCost,
     costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
-    isMonthlyElectricity: body.isMonthlyElectricity || false,
-    localId: body.localId,
+    isMonthlyElectricity: body.isMonthlyElectricity || false, localId: body.localId,
   });
 
-  // --- AUTO-DEDUCT TROLLEY STOCK - FINAL FIX FOR Used=0 ---
+  // DEDUCT USED - FIXED: fallback to FIFO if trolleyEntryId is stock id
   for (const mix of cleanMix) {
     if (mix.rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();
+    let deducted = false;
 
-    // 1. Try to find entry directly by userId (string) + localId
-    let entryDoc = null as { _id: unknown; normalizedMaterial: string } | null;
-    
     if (mix.trolleyEntryId) {
-      entryDoc = await TrolleyEntryModel.findOne({
-        userId: userId,
-        localId: mix.trolleyEntryId,
-      }).lean() as typeof entryDoc;
-    }
-
-    // 2. Fallback: oldest OPEN entry of same material (FIFO)
-    if (!entryDoc) {
-      entryDoc = await TrolleyEntryModel.findOne({
-        userId: userId,
-        normalizedMaterial: normalized,
-        status: "OPEN",
-      }).sort({ date: 1 }).lean() as typeof entryDoc;
-    }
-
-    if (entryDoc) {
-      await TrolleyEntryModel.updateOne(
-        { _id: entryDoc._id as string },
+      const updated = await TrolleyEntryModel.findOneAndUpdate(
+        { ...getUserFilter(userId), localId: mix.trolleyEntryId },
         { $inc: { totalUsed: mix.rairi } }
       );
+      if (updated) deducted = true;
     }
-
-    // 3. Deduct aggregated stock
-    const stock = await TrolleyStockModel.findOne({
-      userId: userId,
-      normalizedMaterial: entryDoc?.normalizedMaterial || normalized,
-    });
-
-    if (stock) {
-      const newRairi = Math.max(0, rnd(stock.totalRairi - mix.rairi));
-      const costDeduct = rnd(mix.rairi * stock.avgRate);
-      await TrolleyStockModel.updateOne(
-        { _id: stock._id },
-        {
-          $set: {
-            totalRairi: newRairi,
-            totalCost: Math.max(0, rnd(stock.totalCost - costDeduct)),
-            updatedAt: new Date(),
-          },
-        }
-      );
+    
+    if (!deducted) {
+      const oldestOpen = await TrolleyEntryModel.findOne({
+        ...getUserFilter(userId), normalizedMaterial: normalized, status: "OPEN",
+      }).sort({ date: 1 });
+      if (oldestOpen) {
+        await TrolleyEntryModel.updateOne({ _id: oldestOpen._id }, { $inc: { totalUsed: mix.rairi } });
+      }
     }
   }
+  await recalcAllStocks(userId);
 
   const monthStr = `${dailyDate.getFullYear()}-${String(dailyDate.getMonth() + 1).padStart(2, "0")}`;
   await recalcMonthlyExpense(userId, monthStr);
 
-  const existing = await BlockProduct.findOne({ 
-    userId, 
-    name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: 'i' } 
+  const existing = await BlockProduct.findOne({
+    userId, name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
   });
-
   if (existing) {
     await BlockProduct.updateOne(
       { _id: existing._id },
-      { 
-        $inc: { stock: count },
-        $push: { stockHistory: { qty: count, date: daily.date, buyPrice: 0, sellPrice: existing.sellPrice } },
-        $set: { lastPurchaseDate: daily.date }
-      }
-    );
-  } else {
-    await BlockProduct.findOneAndUpdate(
-      { userId, category: "block", name: { $regex: body.blockType || "6", $options: 'i' } },
-      { $inc: { stock: count } }
+      { $inc: { stock: count }, $set: { lastPurchaseDate: daily.date } }
     );
   }
 
