@@ -13,6 +13,7 @@ type Params = { params: Promise<{ id: string }> };
 type UpdateBody = {
   material?: string;
   rairiInTrolley?: number;
+  rairiPerTrolley?: number;
   actualRairi?: number;
   trolleyPrice?: number;
   date?: string;
@@ -40,6 +41,12 @@ function getUserFilter(userId: string): UserFilter {
   return { userId: userId };
 }
 
+function getRairiForMaterial(name: string): number {
+  const nm = name.toLowerCase().trim();
+  if (nm.includes("گھٹہ") || nm.includes("شگہ") || nm.includes("ghata") || nm.includes("shaga")) return 55;
+  return 60;
+}
+
 async function recalcStock(userId: string, normalizedMaterial: string) {
   const all = await TrolleyEntryModel.find({
     ...getUserFilter(userId),
@@ -51,15 +58,33 @@ async function recalcStock(userId: string, normalizedMaterial: string) {
   for (const e of all) {
     const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
     const remaining = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    if (remaining <= 0) continue;
+    const rate = Number(Number(e.perRairiRate || 0).toFixed(2)); // ✅ fix 263.157 -> 263.16
     totalRairi += remaining;
-    totalCost += remaining * Number(e.perRairiRate || 0);
+    totalCost += remaining * rate;
   }
   const avgRate = totalRairi > 0 ? Number((totalCost / totalRairi).toFixed(2)) : 0;
-  await TrolleyStockModel.updateOne(
-    { ...getUserFilter(userId), normalizedMaterial: normalizedMaterial },
-    { $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() } },
-    { upsert: true }
-  );
+
+  // ✅ FIX: direct userId for write
+  if (totalRairi <= 0) {
+    await TrolleyStockModel.deleteOne({
+      userId: userId,
+      normalizedMaterial: normalizedMaterial,
+    });
+  } else {
+    await TrolleyStockModel.updateOne(
+      { userId: userId, normalizedMaterial: normalizedMaterial },
+      { 
+        $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() },
+        $setOnInsert: {
+          localId: `stock_${normalizedMaterial}_${Date.now()}`,
+          normalizedMaterial: normalizedMaterial,
+          userId: userId,
+        }
+      },
+      { upsert: true }
+    );
+  }
   return { totalRairi, totalCost, avgRate };
 }
 
@@ -93,6 +118,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!entry) entry = await TrolleyEntryModel.findOne({ localId: id, ...filter });
   if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  const oldNormalized = entry.normalizedMaterial;
+
   if (body.material) {
     entry.material = body.material.trim();
     entry.normalizedMaterial = body.material.trim().toLowerCase();
@@ -100,7 +127,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (body.date) entry.date = new Date(body.date);
   if (body.purpose) entry.purpose = body.purpose;
 
-  if (body.rairiInTrolley !== undefined) entry.rairiInTrolley = rnd(body.rairiInTrolley);
+  if (body.rairiInTrolley !== undefined || body.rairiPerTrolley !== undefined) {
+    const newRairi = rnd(body.rairiInTrolley ?? body.rairiPerTrolley ?? getRairiForMaterial(entry.material));
+    entry.rairiInTrolley = newRairi;
+    if (entry.status === "OPEN") {
+      entry.actualRairi = newRairi;
+      entry.rairiRemaining = Math.max(0, newRairi - rnd(entry.totalUsed));
+    }
+  }
   if (body.actualRairi !== undefined) {
     const actual = rnd(body.actualRairi);
     const est = rnd(entry.rairiInTrolley);
@@ -116,6 +150,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   await entry.save();
+
+  if (oldNormalized !== entry.normalizedMaterial) {
+    await recalcStock(userId, oldNormalized);
+  }
   const stock = await recalcStock(userId, entry.normalizedMaterial);
 
   return NextResponse.json({ data: entry, stock, ok: true });
@@ -146,5 +184,5 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   await TrolleyEntryModel.deleteOne({ _id: entry._id });
   const stock = await recalcStock(userId, normalized);
 
-  return NextResponse.json({ ok: true, stock, message: "Trolley deleted" });
+  return NextResponse.json({ ok: true, stock, message: "Trolley deleted, old dailies untouched" });
 }

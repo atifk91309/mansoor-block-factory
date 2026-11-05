@@ -48,7 +48,7 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
       exist.amount = rnd((exist.amount ?? 0) + (m.amount ?? 0));
       exist.qty = `${exist.rairi} ریڑھی`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی` });
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number(Number(m.rate || 0).toFixed(2)) });
     }
   }
   return Array.from(map.values());
@@ -75,9 +75,11 @@ async function recalcAllStocks(userId: string): Promise<void> {
     if (!norm) continue;
     const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? e.rairiPerTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    if (rem <= 0) continue;
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
+    const rate = Number(Number(e.perRairiRate ?? 0).toFixed(2)); // ✅ fix
     cur.rairi += rem;
-    cur.cost += rem * Number(e.perRairiRate ?? 0);
+    cur.cost += rem * rate;
     map.set(norm, cur);
   }
   
@@ -88,13 +90,30 @@ async function recalcAllStocks(userId: string): Promise<void> {
       { ...getUserFilter(userId), normalizedMaterial: norm },
       {
         $set: { 
-          material: matName, totalRairi: rnd(v.rairi), 
-          totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date()
+          material: matName, 
+          totalRairi: rnd(v.rairi), 
+          totalCost: rnd(v.cost), 
+          avgRate: avg, 
+          updatedAt: new Date()
         },
-        $setOnInsert: { localId: `stock_${norm}`, userId },
+        $setOnInsert: { 
+          localId: `stock_${norm}_${Date.now()}`,
+          normalizedMaterial: norm,
+        }
       },
       { upsert: true }
     );
+  }
+
+  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean() as unknown as { totalRairi: number; normalizedMaterial: string }[];
+  const zeroNorms = allStocks.filter(s => (s.totalRairi || 0) <= 0).map(s => s.normalizedMaterial);
+  if (zeroNorms.length > 0) {
+    await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: zeroNorms } });
+  }
+  const existingNorms = allStocks.map(s => s.normalizedMaterial);
+  const toDelete = existingNorms.filter(n => !map.has(n));
+  if (toDelete.length > 0) {
+    await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: toDelete } });
   }
 }
 
@@ -155,14 +174,15 @@ export async function POST(req: NextRequest) {
   cleanMix = mergeSameMaterial(cleanMix);
 
   const extraBills = cleanBills.reduce((sum, b) => {
-    if (b.label.toLowerCase().includes("labour")) return sum;
-    if (body.isMonthlyElectricity && (b.label.toLowerCase().includes("electric") || b.label.includes("بجلی"))) return sum;
+    const ll = b.label.toLowerCase();
+    if (ll.includes("labour") || b.label.includes("مزدوری") || ll.includes("mazdoor")) return sum;
+    if (body.isMonthlyElectricity && (ll.includes("electric") || b.label.includes("بجلی"))) return sum;
     return sum + (b.amount || 0);
   }, 0);
   
   const trolleyMixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
   const mixCost = trolleyMixCost + cementCost;
-  const totalBill = body.totalBill !== undefined ? rnd(body.totalBill) : wages + extraBills + mixCost;
+  const totalBill = body.totalBill !== undefined ? rnd(body.totalBill) : rnd(wages + extraBills + mixCost);
   const dailyDate = body.date ? new Date(body.date) : new Date();
 
   const daily = await BlockDaily.create({
@@ -175,7 +195,7 @@ export async function POST(req: NextRequest) {
     trolleyMixCost, mixCost, totalBill,
     costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
     isMonthlyElectricity: body.isMonthlyElectricity || false, 
-    localId: body.localId,
+    localId: body.localId || `daily_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
   });
 
   for (const mix of cleanMix) {
@@ -185,7 +205,7 @@ export async function POST(req: NextRequest) {
 
     if (mix.trolleyEntryId) {
       const updated = await TrolleyEntryModel.findOneAndUpdate(
-        { ...getUserFilter(userId), localId: mix.trolleyEntryId },
+        { ...getUserFilter(userId), localId: mix.trolleyEntryId, status: "OPEN" },
         { $inc: { totalUsed: mix.rairi } }
       );
       if (updated) deducted = true;

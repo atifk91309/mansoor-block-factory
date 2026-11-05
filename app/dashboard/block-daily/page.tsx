@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { offlineDB } from "@/lib/offline-db";
+import { offlineDB, cleanupZeroTrolleyStock } from "@/lib/offline-db";
 import { saveBlockDailyOffline, deleteBlockDailyOffline, type BlockDailyInput } from "@/lib/offline-sync";
 import { getOfflineUser } from "@/lib/offline-auth";
 import type { OfflineBlockDaily, BillEntry, MixMaterialEntry, OfflineTrolleyStock, OfflineBlockProduct } from "@/lib/offline-db";
@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 
 const API_TROLLEY = "/api/trolley-stock";
 
-type BlockTypeOption = "4 inch" | "5 inch" | "6 inch" | "8 inch";
+type BlockTypeOption = "4 inch" | "5 inch" | "6 inch";
 type OfflineUser = { _id?: string; id?: string } | null;
 type FormState = { 
   date: string; 
@@ -28,9 +28,10 @@ type BlockDailyDoc = {
 };
 type ApiResponse = { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[]; };
 type SessionResponse = { user?: { id?: string; _id?: string } };
+type TrolleyStockApi = { stock?: OfflineTrolleyStock[] };
 type OfflineDailyWithRate = OfflineBlockDaily & { cementRate?: number; cementCost?: number };
 
-const DEFAULT_BLOCKS = ["شگہ بلاک", "فل کرش بلاک", "مکس کرش بلاک", "ون کھتہ", "3 نمبر کھتہ", "کنکر کھتہ", "مکس کرش بلاک"];
+const DEFAULT_BLOCKS = ["شگہ بلاک", "فل کرش بلاک", "مکس کرش بلاک", "ون کھتہ", "3 نمبر کھتہ", "کنکر کھتہ"];
 
 function getPKDate(): string {
   const d = new Date(); d.setMinutes(d.getMinutes() + d.getTimezoneOffset() + 300);
@@ -53,9 +54,9 @@ export default function BlockDailyPage() {
     ratePerBlock: 3, 
     isMonthlyElectricity: false,
   });
-  // ✅ FIX: مزدوری کی بجائے پیٹرول بل
   const [bills, setBills] = useState<BillEntry[]>([{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]);
-  const [newBillLabel, setNewBillLabel] = useState(""); const [newBillAmount, setNewBillAmount] = useState(0);
+  const [newBillLabel, setNewBillLabel] = useState(""); 
+  const [newBillAmount, setNewBillAmount] = useState(0);
   const [mixMaterials, setMixMaterials] = useState<MixMaterialEntry[]>([]);
   const [newMixLabel, setNewMixLabel] = useState(""); 
   const [newMixRairi, setNewMixRairi] = useState(0);
@@ -64,12 +65,11 @@ export default function BlockDailyPage() {
   const [saving, setSaving] = useState(false);
   const [blockOptions, setBlockOptions] = useState<string[]>(DEFAULT_BLOCKS);
   const [history, setHistory] = useState<OfflineDailyWithRate[]>([]);
-  const [filter, setFilter] = useState(""); const [editingId, setEditingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState(""); 
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editingLocalId, setEditingLocalId] = useState<string | null>(null);
 
   const wages = useMemo(() => rnd(form.blocksCount * form.ratePerBlock), [form.blocksCount, form.ratePerBlock]);
-  
-  // ✅ FIX: ab auto mazdoor overwrite nahi — petrol bill user likhega
   const displayBills = useMemo(() => bills, [bills]);
 
   const { totalBill, mixCost, cementCost, petrolCost } = useMemo(() => {
@@ -144,6 +144,7 @@ export default function BlockDailyPage() {
   useEffect(() => {
     async function load(): Promise<void> {
       try {
+        await cleanupZeroTrolleyStock().catch(()=>0);
         const products = await offlineDB.blockProducts.toArray().catch((): OfflineBlockProduct[] => []);
         if (products.length > 0) {
           const map = new Map<string, string>();
@@ -154,13 +155,15 @@ export default function BlockDailyPage() {
           if (unique.length > 0) setBlockOptions(unique);
         }
         const stocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []);
-        setTrolleyStocks(stocks);
+        setTrolleyStocks(stocks.filter(s => (s.totalRairi||0)>0));
         try {
           const userId = await getUserId();
           const res = await fetch(`${API_TROLLEY}?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
           if (res.ok) {
-            const j = await res.json() as { stock?: OfflineTrolleyStock[] };
-            if (j.stock && j.stock.length > 0) setTrolleyStocks(j.stock);
+            const j = (await res.json()) as TrolleyStockApi;
+            if (j.stock && j.stock.length > 0) {
+              setTrolleyStocks(j.stock.filter(s => (s.totalRairi || 0) > 0));
+            }
           }
         } catch {}
       } catch {}
@@ -169,7 +172,12 @@ export default function BlockDailyPage() {
     void load();
   }, []);
 
-  const addBill = (): void => { if (!newBillLabel.trim()) return; setBills([...bills, { label: newBillLabel.trim(), amount: rnd(newBillAmount || 0) }]); setNewBillLabel(""); setNewBillAmount(0); };
+  const addBill = (): void => { 
+    if (!newBillLabel.trim()) return; 
+    setBills([...bills, { label: newBillLabel.trim(), amount: rnd(newBillAmount || 0) }]); 
+    setNewBillLabel(""); 
+    setNewBillAmount(0); 
+  };
   
   const updateBill = (idx: number, field: "label"|"amount", val: string|number): void => { 
     const copy = [...bills]; 
@@ -185,7 +193,15 @@ export default function BlockDailyPage() {
   const addMix = (): void => { 
     if (!newMixLabel.trim() || newMixRairi <= 0) return;
     const stock = trolleyStocks.find(s => s.normalizedMaterial === newMixLabel.toLowerCase().trim() || s.material === newMixLabel.trim());
-    const rate = newMixRate > 0 ? newMixRate : stock ? Number(Number(stock.avgRate).toFixed(2)) : 0;
+    if (stock && (stock.totalRairi || 0) <= 0) {
+      alert("0 ریڑھی والا اسٹاک ختم ہو گیا - دوبارہ لوڈ کریں");
+      return;
+    }
+    const rate = newMixRate > 0 ? Number(Number(newMixRate).toFixed(2)) : stock ? Number(Number(stock.avgRate).toFixed(2)) : 0;
+    if (rate <= 0) {
+      alert("ریٹ ضروری ہے - اسٹاک یا ریٹ لکھیں");
+      return;
+    }
     const amount = rnd(newMixRairi * rate);
     const entry = { 
       label: newMixLabel.trim(), 
@@ -208,7 +224,7 @@ export default function BlockDailyPage() {
     if (field === "rairi") { 
       item.rairi = rnd(Number(val)||0); 
       item.qty = `${item.rairi} ریڑھی`; 
-      item.amount = rnd(item.rairi * item.rate); 
+      item.amount = rnd(item.rairi * Number(item.rate || 0)); 
     }
     if (field === "rate") { 
       item.rate = Number(Number(val)||0); 
@@ -236,7 +252,7 @@ export default function BlockDailyPage() {
         isMonthlyElectricity: form.isMonthlyElectricity, 
         dailyWages: wages, 
         bills: bills.filter(b => b.label.trim()), 
-        mixMaterials, 
+        mixMaterials: mixMaterials.map(m => ({ ...m, rate: Number(Number(m.rate).toFixed(2)), amount: rnd(m.rairi * Number(Number(m.rate).toFixed(2))) })), 
         totalBill, mixCost, labourCost: wages, petrolCost,
         costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0,
         userId 
@@ -265,7 +281,7 @@ export default function BlockDailyPage() {
       }
       await loadHistory(); 
       const allStocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []);
-      setTrolleyStocks(allStocks);
+      setTrolleyStocks(allStocks.filter(s => (s.totalRairi||0)>0));
       setForm((f) => ({ ...f, date: getPKDate(), blocksCount: 798 }));
       setBills([{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]); 
       setMixMaterials([]);
@@ -283,7 +299,6 @@ export default function BlockDailyPage() {
       ratePerBlock: item.ratePerBlock, 
       isMonthlyElectricity: item.isMonthlyElectricity || false 
     });
-    // ✅ edit pe agar purana mazdoor bill hai to petrol me convert
     const oldBills = item.bills && item.bills.length > 0 ? item.bills : [{ label: "پیٹرول بل", amount: 0 }];
     const fixedBills = oldBills.map(b => b.label.includes("مزدوری") ? { ...b, label: "پیٹرول بل", amount: 0 } : b);
     setBills(fixedBills.length>0 ? fixedBills : [{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]); 
@@ -342,7 +357,7 @@ export default function BlockDailyPage() {
           <div className="space-y-2 sm:space-y-3">
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
               <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-white"><option>4 inch</option><option>5 inch</option><option>6 inch</option><option>8 inch</option></select></div>
+              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-white"><option>4 inch</option><option>5 inch</option><option>6 inch</option></select></div>
             </div>
             <div>
               <label className="text-[9px] sm:text-[10px] font-bold text-gray-600">بلاک کا نام</label>

@@ -1,6 +1,5 @@
 import connectDB from "@/lib/mongodb";
 import { TrolleyEntryModel, TrolleyStockModel } from "@/models/TrolleyStock";
-import BlockDaily from "@/models/BlockDaily";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/route";
@@ -9,14 +8,11 @@ import { Types } from "mongoose";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type CloseBody = { localId: string; actualRairi: number; userId?: string };
-
-type MixMaterialDoc = {
-  label: string;
-  rairi: number;
-  amount: number;
-  rate: number;
-  trolleyEntryId?: string;
+type CloseBody = { 
+  localId: string; 
+  actualRairi?: number;
+  actualQty?: number;
+  userId?: string 
 };
 
 interface TrolleyLean {
@@ -24,17 +20,6 @@ interface TrolleyLean {
   rairiInTrolley: number;
   totalUsed?: number;
   perRairiRate?: number;
-}
-
-interface DailyLean {
-  _id: Types.ObjectId;
-  date: Date;
-  blocksCount: number;
-  cementCost?: number;
-  mixCost?: number;
-  trolleyMixCost?: number;
-  totalBill?: number;
-  mixMaterials: MixMaterialDoc[];
 }
 
 function rnd(n: number): number {
@@ -56,15 +41,19 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
   if (!body.localId) return NextResponse.json({ error: "localId required" }, { status: 400 });
 
-  const actual = rnd(body.actualRairi);
+  const actual = rnd(body.actualRairi ?? body.actualQty ?? 0);
   if (actual <= 0) return NextResponse.json({ error: "actualRairi > 0" }, { status: 400 });
 
   const entry = await TrolleyEntryModel.findOne({ ...getUserFilter(userId), localId: body.localId });
   if (!entry) return NextResponse.json({ error: "Trolley not found" }, { status: 404 });
 
+  if (entry.status === "CLOSED") {
+    return NextResponse.json({ ok: true, message: "Already closed", entry });
+  }
+
   const est = rnd(entry.rairiInTrolley);
+  const oldRate = Number(Number(entry.perRairiRate || 0).toFixed(2));
   const newRate = Number((entry.trolleyPrice / actual).toFixed(2));
-  const oldRate = entry.perRairiRate;
   const rairiLoss = Math.max(0, est - actual);
   const rairiRemaining = Math.max(0, actual - rnd(entry.totalUsed));
 
@@ -86,79 +75,54 @@ export async function POST(req: NextRequest) {
   for (const e of allEntries) {
     const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
     const remaining = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    if (remaining <= 0) continue;
+    const rate = Number(Number(e.perRairiRate ?? 0).toFixed(2));
     totalRairi += remaining;
-    totalCost += remaining * Number(e.perRairiRate ?? 0);
+    totalCost += remaining * rate;
   }
   const avgRate = totalRairi > 0 ? Number((totalCost / totalRairi).toFixed(2)) : 0;
 
-  await TrolleyStockModel.updateOne(
-    { ...getUserFilter(userId), normalizedMaterial: entry.normalizedMaterial },
-    { $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() } },
-    { upsert: true }
-  );
-
-  const allDailies = await BlockDaily.find({ ...getUserFilter(userId) }).sort({ date: -1 }).limit(500).lean<DailyLean[]>();
-
-  let affected = 0;
-  const affectedMonths = new Set<string>();
-
-  for (const daily of allDailies) {
-    let hasMatch = false;
-    let newTrolleyMixCost = 0;
-
-    const updatedMix: MixMaterialDoc[] = daily.mixMaterials.map((m) => {
-      const labelNorm = String(m.label || "").toLowerCase().trim();
-      const idMatch = m.trolleyEntryId === body.localId;
-      const labelMatch = labelNorm === entry.normalizedMaterial;
-      const isMatch = idMatch || labelMatch;
-
-      if (isMatch) {
-        hasMatch = true;
-        const amt = rnd(m.rairi * newRate);
-        newTrolleyMixCost += amt;
-        return { label: m.label, rairi: m.rairi, rate: newRate, amount: amt, trolleyEntryId: body.localId };
-      }
-      newTrolleyMixCost += rnd(m.amount ?? 0);
-      return m;
+  // ✅ FIX: Write direct userId, no $or
+  if (totalRairi <= 0) {
+    await TrolleyStockModel.deleteOne({
+      userId: userId,
+      normalizedMaterial: entry.normalizedMaterial,
     });
-
-    if (!hasMatch) continue;
-
-    const oldTrolley = rnd(daily.trolleyMixCost ?? 0);
-    if (oldTrolley === newTrolleyMixCost) continue;
-
-    const cementCost = rnd(daily.cementCost || 0);
-    const newMixCost = newTrolleyMixCost + cementCost;
-    const oldMixCost = rnd(daily.mixCost || 0);
-    const newTotalBill = rnd((daily.totalBill ?? 0) + (newMixCost - oldMixCost));
-    const newCostPerBlock = daily.blocksCount > 0 ? Number((newTotalBill / daily.blocksCount).toFixed(2)) : 0;
-
-    await BlockDaily.updateOne(
-      { _id: daily._id },
-      { $set: { mixMaterials: updatedMix, trolleyMixCost: newTrolleyMixCost, mixCost: newMixCost, totalBill: newTotalBill, costPerBlock: newCostPerBlock } }
+  } else {
+    await TrolleyStockModel.updateOne(
+      { 
+        userId: userId,
+        normalizedMaterial: entry.normalizedMaterial,
+      },
+      { 
+        $set: { 
+          material: entry.material,
+          totalRairi: rnd(totalRairi), 
+          totalCost: rnd(totalCost), 
+          avgRate, 
+          updatedAt: new Date() 
+        },
+        $setOnInsert: { 
+          localId: `stock_${entry.normalizedMaterial}_${Date.now()}`,
+          normalizedMaterial: entry.normalizedMaterial,
+          userId: userId,
+        }
+      },
+      { upsert: true }
     );
-    affected++;
-    const d = new Date(daily.date);
-    affectedMonths.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-
-  for (const mm of affectedMonths) {
-    try {
-      const { recalcMonthlyExpense } = await import("@/lib/calc-monthly");
-      await recalcMonthlyExpense(userId, mm);
-    } catch {}
   }
 
   return NextResponse.json({
     ok: true,
-    message: `Closed ${est}->${actual} Rairi, rate ${oldRate}->${newRate} Rs, ${affected} dailies recalculated`,
+    message: `Closed ${est}->${actual} Rairi, rate ${oldRate}->${newRate} Rs, stock updated, old dailies untouched`,
+    est,
+    actual,
     diff: actual - est,
     oldRate,
     newRate,
     rairiLoss,
     rairiRemaining,
-    affectedDailies: affected,
-    affectedMonths: Array.from(affectedMonths),
+    affectedDailies: 0,
     stock: { totalRairi, totalCost, avgRate },
   });
 }

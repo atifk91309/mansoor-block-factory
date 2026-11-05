@@ -95,64 +95,92 @@ const BlockDailySchema = new Schema<IBlockDaily>({
 });
 
 BlockDailySchema.pre("validate", function () {
-  const doc = this as unknown as Record<string, unknown> & IBlockDaily;
+  const doc = this as IBlockDaily & {
+    cementBori?: number;
+    isNew: boolean;
+    isModified: (path: string) => boolean;
+  };
 
-  // cementBori -> cementBags map
-  if (doc["cementBori"] !== undefined && !doc.cementBags) {
-    doc.cementBags = Math.round(Number(doc["cementBori"] as number) || 0);
+  if (doc.cementBori !== undefined && !doc.cementBags) {
+    doc.cementBags = Math.round(Number(doc.cementBori) || 0);
   }
-  if (!doc.cementBags) doc.cementBags = 0;
-  if (!doc.date) doc.date = new Date() as unknown as Date;
-
-  // 1. Cement - Bori * Rate
-  const rate = doc.cementRate || 1400;
-  doc.cementRate = Math.round(rate);
-  doc.cementCost = Math.round((doc.cementBags || 0) * rate);
-
-  // 2. Mazdoor - 1 block = 3 Rs
-  const mRate = doc.mazdoorRatePerBlock || doc.ratePerBlock || 3;
-  doc.mazdoorRatePerBlock = mRate;
-  doc.ratePerBlock = mRate;
-  doc.dailyWages = Math.round((doc.blocksCount || 0) * mRate);
-  doc.labourCost = doc.dailyWages;
-
-  // 3. Trolley mix - frozen rate, tiny improvement
-  doc.mixMaterials.forEach((m) => {
-    const mix = m as IMixMaterial;
-    // qty string se rairi nikalna e.g. "10 rairi"
-    if ((!mix.rairi || mix.rairi === 0) && mix.qty) {
-      const num = parseInt(mix.qty.replace(/[^0-9]/g, "") || "0", 10);
-      mix.rairi = Number.isNaN(num) ? 0 : num;
-    }
-    // Frozen rate touch with trolley - rate change nahi hoga
-    if (mix.rairi && mix.rate) {
-      mix.rate = Number(Number(mix.rate).toFixed(2)); // 1100, 216.67 fix
-      mix.amount = Math.round(mix.rairi * mix.rate);
-    } else {
-      mix.amount = Math.round(mix.amount || 0);
-    }
-  });
-
-  // 4. Totals - Labour duplicate avoid + monthly bijli skip
-  const extraBills = doc.bills.reduce((sum: number, b: IBill) => {
-    const l = b.label.toLowerCase();
-    if (l.includes("labour") || b.label.includes("مزدوری") || l.includes("mazdoor")) return sum;
-    if (doc.isMonthlyElectricity && (l.includes("electric") || b.label.includes("بجلی"))) return sum;
-    return sum + (b.amount || 0);
-  }, 0);
-
-  doc.trolleyMixCost = doc.mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
-  doc.mixCost = doc.trolleyMixCost + doc.cementCost;
-  doc.totalBill = doc.labourCost + extraBills + doc.mixCost;
-
-  if (doc.blocksCount > 0) {
-    doc.costPerBlock = Math.round((doc.totalBill / doc.blocksCount) * 100) / 100;
-  } else {
-    doc.costPerBlock = 0;
+  if (!doc.cementBags) {
+    doc.cementBags = 0;
+  }
+  if (!doc.date) {
+    doc.date = new Date();
   }
 
-  // batchId auto if not
-  if (!doc.batchId && doc.localId) doc.batchId = doc.localId;
+  const isNewDoc = doc.isNew;
+  const isMixModified = doc.isModified("mixMaterials");
+  const isBagsModified = doc.isModified("cementBags") || doc.isModified("cementRate");
+  const isCountModified = doc.isModified("blocksCount") || doc.isModified("ratePerBlock") || doc.isModified("mazdoorRatePerBlock");
+  const isBillsModified = doc.isModified("bills");
+
+  // 1. Cement - sirf new ya bags change pe
+  if (isNewDoc || isBagsModified) {
+    const rate = doc.cementRate || 1400;
+    doc.cementRate = Math.round(rate);
+    doc.cementCost = Math.round((doc.cementBags || 0) * rate);
+  }
+
+  // 2. Mazdoor - sirf new ya count change pe
+  if (isNewDoc || isCountModified) {
+    const mRate = doc.mazdoorRatePerBlock || doc.ratePerBlock || 3;
+    doc.mazdoorRatePerBlock = mRate;
+    doc.ratePerBlock = mRate;
+    doc.dailyWages = Math.round((doc.blocksCount || 0) * mRate);
+    doc.labourCost = doc.dailyWages;
+  }
+
+  // 3. Trolley mix - FROZEN - sirf new ya mix change pe
+  if (isNewDoc || isMixModified) {
+    doc.mixMaterials.forEach((m) => {
+      if ((!m.rairi || m.rairi === 0) && m.qty) {
+        const num = parseInt(m.qty.replace(/[^0-9]/g, "") || "0", 10);
+        m.rairi = Number.isNaN(num) ? 0 : num;
+      }
+      if (isNewDoc) {
+        if (m.rairi && m.rate) {
+          m.rate = Number(Number(m.rate).toFixed(2));
+          m.amount = Math.round(m.rairi * m.rate);
+        }
+      } else if (!m.amount && m.rairi && m.rate) {
+        m.amount = Math.round(m.rairi * m.rate);
+      }
+    });
+  }
+
+  // 4. Totals - sirf jab zaroori ho
+  if (isNewDoc || isMixModified || isBagsModified || isCountModified || isBillsModified) {
+    const extraBills = doc.bills.reduce((sum, b) => {
+      const l = b.label.toLowerCase();
+      if (l.includes("labour") || b.label.includes("مزدوری") || l.includes("mazdoor")) {
+        return sum;
+      }
+      if (doc.isMonthlyElectricity && (l.includes("electric") || b.label.includes("بجلی"))) {
+        return sum;
+      }
+      return sum + (b.amount || 0);
+    }, 0);
+
+    if (isNewDoc || isMixModified || isBagsModified) {
+      doc.trolleyMixCost = doc.mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
+      doc.mixCost = doc.trolleyMixCost + (doc.cementCost || 0);
+    }
+    if (isNewDoc || isMixModified || isBagsModified || isCountModified || isBillsModified) {
+      doc.totalBill = (doc.labourCost || 0) + extraBills + (doc.mixCost || 0);
+      if (doc.blocksCount > 0) {
+        doc.costPerBlock = Math.round((doc.totalBill / doc.blocksCount) * 100) / 100;
+      } else {
+        doc.costPerBlock = 0;
+      }
+    }
+  }
+
+  if (!doc.batchId && doc.localId) {
+    doc.batchId = doc.localId;
+  } 
 });
 
 BlockDailySchema.index({ userId: 1, date: -1 });

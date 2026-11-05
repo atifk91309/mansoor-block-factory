@@ -29,6 +29,7 @@ interface TrolleyLean {
   material: string; 
   normalizedMaterial: string;
   rairiInTrolley?: number;
+  rairiPerTrolley?: number;
   actualRairi?: number;
   totalUsed?: number; 
   perRairiRate?: number;
@@ -59,8 +60,9 @@ async function recalcAllStocks(userId: string): Promise<void> {
   for (const e of allEntries) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? 0);
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? e.rairiPerTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    if (rem <= 0) continue;
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
     cur.rairi += rem;
     cur.cost += rem * Number(e.perRairiRate ?? 0);
@@ -73,10 +75,17 @@ async function recalcAllStocks(userId: string): Promise<void> {
       { ...getUserFilter(userId), normalizedMaterial: norm },
       { 
         $set: { material: matName, totalRairi: rnd(v.rairi), totalCost: rnd(v.cost), avgRate: avg, updatedAt: new Date() },
-        $setOnInsert: { localId: `stock_${norm}`, userId }
+        $setOnInsert: { localId: `stock_${norm}_${Date.now()}`, userId }
       },
       { upsert: true }
     );
+  }
+  // ✅ 0 wale auto-delete
+  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean() as unknown as { normalizedMaterial: string; totalRairi: number }[];
+  const existingNorms = allStocks.map(s => s.normalizedMaterial);
+  const toDelete = existingNorms.filter(n => !map.has(n));
+  if (toDelete.length > 0) {
+    await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: toDelete } });
   }
 }
 
@@ -113,7 +122,7 @@ async function applyTrolleyUsage(userId: string, mixes: MixBody[]): Promise<void
     let deducted = false;
     if (mix.trolleyEntryId) {
       const updated = await TrolleyEntryModel.findOneAndUpdate(
-        { ...getUserFilter(userId), localId: mix.trolleyEntryId },
+        { ...getUserFilter(userId), localId: mix.trolleyEntryId, status: "OPEN" },
         { $inc: { totalUsed: rairi } }
       );
       if (updated) deducted = true;
@@ -134,11 +143,12 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
     const norm = m.label.toLowerCase().trim();
     const existing = map.get(norm);
     if (existing) {
+      // ✅ frozen rate keep
       existing.rairi = rnd(existing.rairi + m.rairi);
       existing.amount = rnd((existing.amount ?? 0) + (m.amount ?? 0));
       existing.qty = `${existing.rairi} ریڑھی`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی` });
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number(Number(m.rate || 0).toFixed(2)) });
     }
   }
   return Array.from(map.values());
@@ -212,15 +222,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const cementCost = rnd(body.cementCost ?? cementBags * cementRate);
 
     const cleanBills: BillBody[] = (body.bills ?? old.bills ?? []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
+    
+    // ✅ FROZEN - edit pe bhi rate preserve, 2 decimal
     let cleanMix: MixBody[] = (body.mixMaterials ?? old.mixMaterials ?? []).filter((m) => m.label?.trim() && (m.rairi || 0) > 0).map((m) => ({
-      label: m.label.trim(), qty: m.qty?.trim() || `${rnd(m.rairi || 0)} ریڑھی`, rairi: rnd(m.rairi || 0), rate: rnd(m.rate || 0),
-      amount: rnd(m.amount || rnd(m.rairi || 0) * rnd(m.rate || 0)), trolleyEntryId: m.trolleyEntryId?.trim(), batchId: m.batchId
+      label: m.label.trim(), 
+      qty: m.qty?.trim() || `${rnd(m.rairi || 0)} ریڑھی`, 
+      rairi: rnd(m.rairi || 0), 
+      rate: Number(Number(m.rate || 0).toFixed(2)), // frozen 216.67 keep
+      amount: rnd(m.amount || rnd(m.rairi || 0) * Number(Number(m.rate || 0).toFixed(2))), 
+      trolleyEntryId: m.trolleyEntryId?.trim(), 
+      batchId: m.batchId
     }));
     cleanMix = mergeSameMaterial(cleanMix);
 
     const extraBills = cleanBills.reduce((sum, b) => {
-      if (b.label.toLowerCase().includes("labour")) return sum;
-      if ((body.isMonthlyElectricity ?? old.isMonthlyElectricity) && (b.label.toLowerCase().includes("electric") || b.label.includes("بجلی"))) return sum;
+      const ll = b.label.toLowerCase();
+      if (ll.includes("labour") || b.label.includes("مزدوری") || ll.includes("mazdoor")) return sum;
+      if ((body.isMonthlyElectricity ?? old.isMonthlyElectricity) && (ll.includes("electric") || b.label.includes("بجلی"))) return sum;
       return sum + (b.amount || 0);
     }, 0);
     const trolleyMixCost = cleanMix.reduce((s, m) => s + (m.amount || 0), 0);
@@ -228,6 +246,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const labourCost = rnd(newCount * mazdoorRate);
     const totalBill = labourCost + extraBills + mixCost;
 
+    // ✅ Pehle revert, phir apply - stock sahi rahega
     await revertTrolleyUsage(userId, old.mixMaterials || []);
 
     const updated = await BlockDaily.findOneAndUpdate(
