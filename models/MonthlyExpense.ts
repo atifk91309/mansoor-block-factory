@@ -1,8 +1,8 @@
-import mongoose, { Schema, Document, Types, Query } from "mongoose";
+import mongoose, { Schema, Document, Types, Query, UpdateQuery } from "mongoose";
 
 export interface IMonthlyExpense extends Document {
   month: string;
-  batchId?: string; // OPTIONAL now
+  batchId?: string;
   userId: Types.ObjectId | string;
   electricity: number;
   rent: number;
@@ -14,6 +14,7 @@ export interface IMonthlyExpense extends Document {
   totalCementCost: number;
   totalCementBags: number;
   totalTrolleyCost: number;
+  totalRairiUsed?: number;
   totalLabourCost: number;
   costPerBlock: number;
   grandCostPerBlock: number;
@@ -22,18 +23,19 @@ export interface IMonthlyExpense extends Document {
 
 const MonthlyExpenseSchema = new Schema<IMonthlyExpense>({
   month: { type: String, required: true, trim: true, index: true },
-  batchId: { type: String, required: false, trim: true }, // OPTIONAL - No default BATCH-1
+  batchId: { type: String, required: false, trim: true },
   userId: { type: Schema.Types.Mixed, required: true, index: true },
   electricity: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   rent: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   other: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   totalMonthly: { type: Number, default: 0, min: 0 },
   totalBlocks: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
-  totalDailyBill: { type: Number, default: 0, min: 0 },
+  totalDailyBill: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   totalMixCost: { type: Number, default: 0, min: 0 },
   totalCementCost: { type: Number, default: 0, min: 0 },
   totalCementBags: { type: Number, default: 0, min: 0 },
   totalTrolleyCost: { type: Number, default: 0, min: 0 },
+  totalRairiUsed: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   totalLabourCost: { type: Number, default: 0, min: 0 },
   costPerBlock: { type: Number, default: 0, min: 0 },
   grandCostPerBlock: { type: Number, default: 0, min: 0 },
@@ -46,6 +48,8 @@ type CalcInput = {
   other?: number;
   totalBlocks?: number;
   totalDailyBill?: number;
+  totalCementCost?: number;
+  totalTrolleyCost?: number;
 };
 
 function calcFields(doc: CalcInput) {
@@ -57,7 +61,8 @@ function calcFields(doc: CalcInput) {
   const totalMonthly = electricity + rent + other;
   const costPerBlock = totalBlocks > 0 ? Number((totalMonthly / totalBlocks).toFixed(2)) : 0;
   const grandCostPerBlock = totalBlocks > 0 ? Number(((totalDailyBill + totalMonthly) / totalBlocks).toFixed(2)) : 0;
-  return { totalMonthly, costPerBlock, grandCostPerBlock, trueCostPerBlock: grandCostPerBlock };
+  const totalMixCost = Math.round((doc.totalCementCost || 0) + (doc.totalTrolleyCost || 0));
+  return { totalMonthly, costPerBlock, grandCostPerBlock, trueCostPerBlock: grandCostPerBlock, totalMixCost };
 }
 
 MonthlyExpenseSchema.pre("validate", function() {
@@ -67,21 +72,28 @@ MonthlyExpenseSchema.pre("validate", function() {
     other: this.other,
     totalBlocks: this.totalBlocks,
     totalDailyBill: this.totalDailyBill,
+    totalCementCost: this.totalCementCost,
+    totalTrolleyCost: this.totalTrolleyCost,
   });
   this.totalMonthly = c.totalMonthly;
   this.costPerBlock = c.costPerBlock;
   this.grandCostPerBlock = c.grandCostPerBlock;
   this.trueCostPerBlock = c.trueCostPerBlock;
-  if (this.totalCementCost || this.totalTrolleyCost) {
-    this.totalMixCost = (this.totalCementCost || 0) + (this.totalTrolleyCost || 0);
-  }
+  this.totalMixCost = c.totalMixCost;
 });
 
-MonthlyExpenseSchema.pre("findOneAndUpdate", function(this: Query<unknown, IMonthlyExpense>) {
-  const rawUpdate = this.getUpdate();
+MonthlyExpenseSchema.pre("findOneAndUpdate", function(this: Query<IMonthlyExpense, IMonthlyExpense>) {
+  const rawUpdate = this.getUpdate() as UpdateQuery<IMonthlyExpense> | null;
   if (!rawUpdate) return;
-  const updateObj = rawUpdate as Record<string, unknown>;
-  const setObj = (updateObj.$set as Partial<IMonthlyExpense> | undefined) || (updateObj as unknown as Partial<IMonthlyExpense>);
+
+  const isSetUpdate = (u: UpdateQuery<IMonthlyExpense>): u is UpdateQuery<IMonthlyExpense> & { $set: Partial<IMonthlyExpense> } => {
+    return typeof u === "object" && u !== null && "$set" in u;
+  };
+
+  const setObj: Partial<IMonthlyExpense> = isSetUpdate(rawUpdate) 
+    ? { ...rawUpdate.$set } 
+    : { ...(rawUpdate as Partial<IMonthlyExpense>) };
+
   const hasRelevant =
     setObj.electricity !== undefined ||
     setObj.rent !== undefined ||
@@ -90,22 +102,26 @@ MonthlyExpenseSchema.pre("findOneAndUpdate", function(this: Query<unknown, IMont
     setObj.totalDailyBill !== undefined ||
     setObj.totalCementCost !== undefined ||
     setObj.totalTrolleyCost !== undefined ||
-    setObj.totalLabourCost !== undefined;
+    setObj.totalRairiUsed !== undefined;
+
   if (!hasRelevant) return;
-  if (setObj.totalCementCost !== undefined || setObj.totalTrolleyCost !== undefined) {
-    setObj.totalMixCost = (setObj.totalCementCost || 0) + (setObj.totalTrolleyCost || 0);
-  }
+
   const c = calcFields({
     electricity: setObj.electricity,
     rent: setObj.rent,
     other: setObj.other,
     totalBlocks: setObj.totalBlocks,
     totalDailyBill: setObj.totalDailyBill,
+    totalCementCost: setObj.totalCementCost,
+    totalTrolleyCost: setObj.totalTrolleyCost,
   });
+
   setObj.totalMonthly = c.totalMonthly;
   setObj.costPerBlock = c.costPerBlock;
   setObj.grandCostPerBlock = c.grandCostPerBlock;
   setObj.trueCostPerBlock = c.trueCostPerBlock;
+  setObj.totalMixCost = c.totalMixCost;
+
   this.setUpdate({ $set: setObj });
 });
 

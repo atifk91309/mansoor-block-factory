@@ -3,6 +3,7 @@ import MonthlyExpense from "@/models/MonthlyExpense";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
+import { Types } from "mongoose";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,6 +21,7 @@ type MonthlyBody = {
   totalCementCost?: number;
   totalCementBags?: number;
   totalTrolleyCost?: number;
+  totalRairiUsed?: number;
   totalLabourCost?: number;
   costPerBlock?: number;
   grandCostPerBlock?: number;
@@ -30,6 +32,16 @@ type MonthlyBody = {
 
 function rnd(n: number): number { return Math.round(n || 0); }
 
+type UserFilter = { userId: string; month?: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }]; month?: string };
+
+function getUserFilter(userId: string, month?: string): UserFilter {
+  const base = month ? { month } : {};
+  if (Types.ObjectId.isValid(userId)) {
+    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }], ...base } as UserFilter;
+  }
+  return { userId: userId, ...base } as UserFilter;
+}
+
 export async function GET(req: NextRequest) {
   await connectDB();
   const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
@@ -37,11 +49,9 @@ export async function GET(req: NextRequest) {
   const userId = session?.user?.id || queryUserId;
   if (!userId) return NextResponse.json({ data: [] });
 
-  const month = req.nextUrl.searchParams.get("month");
-  const filter: Record<string, unknown> = { userId };
-  if (month) filter.month = month;
+  const month = req.nextUrl.searchParams.get("month") || undefined;
+  const filter = getUserFilter(userId, month);
 
-  // NO batchId filter - show all months
   const data = await MonthlyExpense.find(filter).sort({ month: -1 }).lean();
   return NextResponse.json({ data });
 }
@@ -58,7 +68,7 @@ export async function POST(req: NextRequest) {
   const userId = session?.user?.id || body.userId;
   if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
 
-  const batchId = body.batchId; // OPTIONAL
+  const batchId = body.batchId;
   const electricity = rnd(body.electricity || 0);
   const rent = rnd(body.rent || 0);
   const other = rnd(body.other || 0);
@@ -68,6 +78,7 @@ export async function POST(req: NextRequest) {
   const totalCementCost = rnd(body.totalCementCost || 0);
   const totalCementBags = rnd(body.totalCementBags || 0);
   const totalTrolleyCost = rnd(body.totalTrolleyCost || 0);
+  const totalRairiUsed = rnd(body.totalRairiUsed || 0);
   const totalLabourCost = rnd(body.totalLabourCost || 0);
   
   const totalMonthly = electricity + rent + other;
@@ -90,6 +101,7 @@ export async function POST(req: NextRequest) {
       totalCementCost,
       totalCementBags,
       totalTrolleyCost,
+      totalRairiUsed,
       totalLabourCost,
       costPerBlock,
       grandCostPerBlock,

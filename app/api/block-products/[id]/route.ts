@@ -14,6 +14,7 @@ type UpdateBody = {
   category?: "khaka" | "crush" | "bajri" | "rait" | "block" | "cement" | "other" | "brick";
   stock?: number;
   stockMode?: "limited" | "unlimited";
+  unit?: "trolley" | "tumper" | "bori" | "block" | "piece" | "cft" | "other";
   buyPrice?: number;
   buyPriceAvg?: number;
   sellPrice?: number;
@@ -24,13 +25,6 @@ type UpdateBody = {
 
 function rnd(n: number): number { return Math.round(n || 0); }
 function isValidId(id: string): boolean { return mongoose.Types.ObjectId.isValid(id); }
-
-function getRairiForMaterial(name: string): number {
-  const nm = name.toLowerCase();
-  if (nm.includes("منیرے") || nm.includes("maneray") || nm.includes("ترکے") || nm.includes("tarakay") || nm.includes("پن") || nm.includes("pin")) return 60;
-  if (nm.includes("گھٹہ") || nm.includes("ghata")) return 55;
-  return 60;
-}
 
 export async function GET(_req: NextRequest, { params }: Params) {
   await connectDB();
@@ -57,26 +51,25 @@ export async function PUT(req: NextRequest, { params }: Params) {
     existing.normalizedName = body.name.trim().toLowerCase();
   }
   if (body.category) existing.category = body.category as typeof existing.category;
+  if (body.unit) existing.unit = body.unit as typeof existing.unit;
   if (body.stockMode) existing.stockMode = body.stockMode;
   if (typeof body.buyPrice === "number") existing.buyPrice = rnd(body.buyPrice);
   if (typeof body.buyPriceAvg === "number") existing.buyPriceAvg = rnd(body.buyPriceAvg);
   if (typeof body.sellPrice === "number") existing.sellPrice = rnd(body.sellPrice);
   if (body.batchId) {
-    (existing as unknown as { batchId?: string }).batchId = body.batchId;
+    existing.batchId = body.batchId;
   }
 
   if (typeof body.stock === "number") {
     const newQty = rnd(body.stock);
     if (body.isAddingStock) {
       existing.stock = rnd(existing.stock + newQty);
-      const entry = {
+      const entry: StockHistoryItem = {
         qty: newQty,
         date: now,
         buyPrice: existing.buyPriceAvg,
         sellPrice: existing.sellPrice,
-        batchId: body.batchId || (existing as unknown as { batchId?: string }).batchId,
-        rairiQty: getRairiForMaterial(existing.name),
-      } as unknown as StockHistoryItem;
+      };
       existing.stockHistory.push(entry);
       existing.lastPurchaseDate = now;
     } else {

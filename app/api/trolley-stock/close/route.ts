@@ -4,6 +4,7 @@ import BlockDaily from "@/models/BlockDaily";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/route";
+import { Types } from "mongoose";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,8 +19,33 @@ type MixMaterialDoc = {
   trolleyEntryId?: string;
 };
 
+interface TrolleyLean {
+  actualRairi?: number;
+  rairiInTrolley: number;
+  totalUsed?: number;
+  perRairiRate?: number;
+}
+
+interface DailyLean {
+  _id: Types.ObjectId;
+  date: Date;
+  blocksCount: number;
+  cementCost?: number;
+  mixCost?: number;
+  trolleyMixCost?: number;
+  totalBill?: number;
+  mixMaterials: MixMaterialDoc[];
+}
+
 function rnd(n: number): number {
   return Math.round(Number(n) || 0);
+}
+
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+
+function getUserFilter(userId: string): UserFilter {
+  if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  return { userId: userId };
 }
 
 export async function POST(req: NextRequest) {
@@ -33,7 +59,7 @@ export async function POST(req: NextRequest) {
   const actual = rnd(body.actualRairi);
   if (actual <= 0) return NextResponse.json({ error: "actualRairi > 0" }, { status: 400 });
 
-  const entry = await TrolleyEntryModel.findOne({ userId: userId, localId: body.localId });
+  const entry = await TrolleyEntryModel.findOne({ ...getUserFilter(userId), localId: body.localId });
   if (!entry) return NextResponse.json({ error: "Trolley not found" }, { status: 404 });
 
   const est = rnd(entry.rairiInTrolley);
@@ -42,7 +68,6 @@ export async function POST(req: NextRequest) {
   const rairiLoss = Math.max(0, est - actual);
   const rairiRemaining = Math.max(0, actual - rnd(entry.totalUsed));
 
-  // FIX: direct set — no as unknown cast
   entry.actualRairi = actual;
   entry.perRairiRate = newRate;
   entry.status = "CLOSED";
@@ -51,11 +76,10 @@ export async function POST(req: NextRequest) {
   entry.closedAt = new Date();
   await entry.save();
 
-  // Stock recalc - No batch filter (tumhari requirement)
   const allEntries = await TrolleyEntryModel.find({
-    userId: userId,
+    ...getUserFilter(userId),
     normalizedMaterial: entry.normalizedMaterial,
-  }).lean();
+  }).lean<TrolleyLean[]>();
 
   let totalRairi = 0;
   let totalCost = 0;
@@ -68,13 +92,12 @@ export async function POST(req: NextRequest) {
   const avgRate = totalRairi > 0 ? Number((totalCost / totalRairi).toFixed(2)) : 0;
 
   await TrolleyStockModel.updateOne(
-    { userId: userId, normalizedMaterial: entry.normalizedMaterial },
+    { ...getUserFilter(userId), normalizedMaterial: entry.normalizedMaterial },
     { $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() } },
     { upsert: true }
   );
 
-  // Recalc dailies - No batch filter
-  const allDailies = await BlockDaily.find({ userId: userId }).sort({ date: -1 }).limit(500).lean();
+  const allDailies = await BlockDaily.find({ ...getUserFilter(userId) }).sort({ date: -1 }).limit(500).lean<DailyLean[]>();
 
   let affected = 0;
   const affectedMonths = new Set<string>();
@@ -93,22 +116,10 @@ export async function POST(req: NextRequest) {
         hasMatch = true;
         const amt = rnd(m.rairi * newRate);
         newTrolleyMixCost += amt;
-        return {
-          label: m.label,
-          rairi: m.rairi,
-          rate: newRate,
-          amount: amt,
-          trolleyEntryId: body.localId,
-        };
+        return { label: m.label, rairi: m.rairi, rate: newRate, amount: amt, trolleyEntryId: body.localId };
       }
       newTrolleyMixCost += rnd(m.amount ?? 0);
-      return {
-        label: m.label,
-        rairi: m.rairi,
-        rate: m.rate,
-        amount: m.amount,
-        trolleyEntryId: m.trolleyEntryId,
-      };
+      return m;
     });
 
     if (!hasMatch) continue;
@@ -124,15 +135,7 @@ export async function POST(req: NextRequest) {
 
     await BlockDaily.updateOne(
       { _id: daily._id },
-      {
-        $set: {
-          mixMaterials: updatedMix,
-          trolleyMixCost: newTrolleyMixCost,
-          mixCost: newMixCost,
-          totalBill: newTotalBill,
-          costPerBlock: newCostPerBlock,
-        },
-      }
+      { $set: { mixMaterials: updatedMix, trolleyMixCost: newTrolleyMixCost, mixCost: newMixCost, totalBill: newTotalBill, costPerBlock: newCostPerBlock } }
     );
     affected++;
     const d = new Date(daily.date);

@@ -49,9 +49,9 @@ const BillSchema = new Schema<IBill>({
 const MixMaterialSchema = new Schema<IMixMaterial>({
   label: { type: String, required: true, trim: true },
   qty: { type: String, trim: true, default: "" },
-  rairi: { type: Number, default: 0, min: 0 },
+  rairi: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   rate: { type: Number, default: 0, min: 0 },
-  amount: { type: Number, default: 0, min: 0 },
+  amount: { type: Number, default: 0, min: 0, set: (v: number) => Math.round(v || 0) },
   trolleyEntryId: { type: String, trim: true },
   batchId: { type: String, trim: true, required: false },
 }, { _id: false });
@@ -59,7 +59,6 @@ const MixMaterialSchema = new Schema<IMixMaterial>({
 const BlockDailySchema = new Schema<IBlockDaily>({
   date: { type: Date, required: true, default: Date.now, index: true },
   
-  // --- FIX: cementBags = cement Bori (dono naam support) ---
   cementBags: { 
     type: Number, 
     required: false, 
@@ -67,7 +66,7 @@ const BlockDailySchema = new Schema<IBlockDaily>({
     default: 0, 
     set: (v: number): number => Math.round(v || 0) 
   },
-  cementRate: { type: Number, required: false, default: 1400, min: 0 },
+  cementRate: { type: Number, required: false, default: 1400, min: 0, set: (v: number) => Math.round(v || 0) },
   cementCost: { type: Number, default: 0, min: 0 },
   
   blocksMade: { type: String, required: true, trim: true, index: true },
@@ -92,23 +91,22 @@ const BlockDailySchema = new Schema<IBlockDaily>({
   localId: { type: String, trim: true, index: true },
 }, { 
   timestamps: true,
-  strict: false, // FIX: purane cementBori field ko allow karega
+  strict: false,
 });
 
 BlockDailySchema.pre("validate", function () {
   const doc = this as unknown as Record<string, unknown> & IBlockDaily;
 
-  // FIX: agar frontend se cementBori aaye to cementBags me map karo
+  // cementBori -> cementBags map
   if (doc["cementBori"] !== undefined && !doc.cementBags) {
-    const boriVal = Number(doc["cementBori"] as number) || 0;
-    doc.cementBags = Math.round(boriVal);
+    doc.cementBags = Math.round(Number(doc["cementBori"] as number) || 0);
   }
   if (!doc.cementBags) doc.cementBags = 0;
   if (!doc.date) doc.date = new Date() as unknown as Date;
 
-  // 1. Cement - Bori * Rate (default 1400, frontend 1200 bhi support)
+  // 1. Cement - Bori * Rate
   const rate = doc.cementRate || 1400;
-  doc.cementRate = rate;
+  doc.cementRate = Math.round(rate);
   doc.cementCost = Math.round((doc.cementBags || 0) * rate);
 
   // 2. Mazdoor - 1 block = 3 Rs
@@ -118,23 +116,28 @@ BlockDailySchema.pre("validate", function () {
   doc.dailyWages = Math.round((doc.blocksCount || 0) * mRate);
   doc.labourCost = doc.dailyWages;
 
-  // 3. Trolley mix - frozen rate - Maneray 60, Ghata 55 - 2 decimal fix
+  // 3. Trolley mix - frozen rate, tiny improvement
   doc.mixMaterials.forEach((m) => {
     const mix = m as IMixMaterial;
-    if (!mix.rairi && mix.qty) {
+    // qty string se rairi nikalna e.g. "10 rairi"
+    if ((!mix.rairi || mix.rairi === 0) && mix.qty) {
       const num = parseInt(mix.qty.replace(/[^0-9]/g, "") || "0", 10);
       mix.rairi = Number.isNaN(num) ? 0 : num;
     }
+    // Frozen rate touch with trolley - rate change nahi hoga
     if (mix.rairi && mix.rate) {
+      mix.rate = Number(Number(mix.rate).toFixed(2)); // 1100, 216.67 fix
       mix.amount = Math.round(mix.rairi * mix.rate);
-      mix.rate = Number(Number(mix.rate).toFixed(2)); // 216.67 fix
+    } else {
+      mix.amount = Math.round(mix.amount || 0);
     }
   });
 
-  // 4. Totals
+  // 4. Totals - Labour duplicate avoid + monthly bijli skip
   const extraBills = doc.bills.reduce((sum: number, b: IBill) => {
-    if (b.label.toLowerCase().includes("labour") || b.label.includes("مزدوری")) return sum;
-    if (doc.isMonthlyElectricity && (b.label.toLowerCase().includes("electric") || b.label.includes("بجلی"))) return sum;
+    const l = b.label.toLowerCase();
+    if (l.includes("labour") || b.label.includes("مزدوری") || l.includes("mazdoor")) return sum;
+    if (doc.isMonthlyElectricity && (l.includes("electric") || b.label.includes("بجلی"))) return sum;
     return sum + (b.amount || 0);
   }, 0);
 
@@ -144,11 +147,17 @@ BlockDailySchema.pre("validate", function () {
 
   if (doc.blocksCount > 0) {
     doc.costPerBlock = Math.round((doc.totalBill / doc.blocksCount) * 100) / 100;
+  } else {
+    doc.costPerBlock = 0;
   }
+
+  // batchId auto if not
+  if (!doc.batchId && doc.localId) doc.batchId = doc.localId;
 });
 
 BlockDailySchema.index({ userId: 1, date: -1 });
 BlockDailySchema.index({ userId: 1, localId: 1 }, { unique: true, sparse: true });
+BlockDailySchema.index({ userId: 1, blockType: 1 });
 
 const BlockDailyModel =
   (mongoose.models.BlockDaily as mongoose.Model<IBlockDaily>) ||

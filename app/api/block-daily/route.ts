@@ -29,7 +29,9 @@ type BlockDailyBody = {
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
 
-function getUserFilter(userId: string): Record<string, unknown> {
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+
+function getUserFilter(userId: string): UserFilter {
   if (Types.ObjectId.isValid(userId)) {
     return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
   }
@@ -52,20 +54,26 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
   return Array.from(map.values());
 }
 
+interface TrolleyEntryLean {
+  material: string; 
+  normalizedMaterial: string;
+  rairiInTrolley?: number; 
+  rairiPerTrolley?: number;
+  actualRairi?: number;
+  totalUsed?: number; 
+  perRairiRate?: number;
+}
+
 async function recalcAllStocks(userId: string): Promise<void> {
   const all = await TrolleyEntryModel.find({ 
     ...getUserFilter(userId)
-  }).lean() as unknown as Array<{
-    material: string; normalizedMaterial: string;
-    rairiInTrolley: number; actualRairi?: number;
-    totalUsed?: number; perRairiRate?: number;
-  }>;
+  }).lean<TrolleyEntryLean[]>();
   
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of all) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? e.rairiPerTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
     cur.rairi += rem;
@@ -99,8 +107,7 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const baseFilter = getUserFilter(userId);
-  const dateFilter: Record<string, unknown> = from && to ? { date: { $gte: new Date(from), $lte: new Date(to) } } : {};
-  // NO batchId filter - show all
+  const dateFilter = from && to ? { date: { $gte: new Date(from), $lte: new Date(to) } } : {};
   const data = await BlockDaily.find({ ...baseFilter, ...dateFilter }).sort({ date: -1 }).limit(500).lean();
   return NextResponse.json({ data, blockDailies: data });
 }
@@ -113,7 +120,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
   if (!body.blocksMade?.trim()) return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
 
-  const batchId = body.batchId; // OPTIONAL
+  const batchId = body.batchId;
   const mazdoorRate = rnd(body.mazdoorRatePerBlock || body.ratePerBlock || 3);
   const count = rnd(body.blocksCount || 0);
   if (count <= 0) return NextResponse.json({ error: "blocksCount > 0 required" }, { status: 400 });
@@ -134,7 +141,7 @@ export async function POST(req: NextRequest) {
     .filter((m) => m.label?.trim() && (m.rairi || 0) > 0)
     .map((m): MixBody => {
       const rairi = rnd(m.rairi || 0);
-      const ratePerRairi = rnd(m.rate || 0);
+      const ratePerRairi = Number((m.rate || 0).toFixed(2));
       return {
         label: m.label.trim(),
         qty: m.qty?.trim() || `${rairi} ریڑھی`,
@@ -171,7 +178,6 @@ export async function POST(req: NextRequest) {
     localId: body.localId,
   });
 
-  // DEDUCT USED - No batch filter, FIFO by date - Maneray 60 / Ghata 55
   for (const mix of cleanMix) {
     if (mix.rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();

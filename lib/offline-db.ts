@@ -7,40 +7,40 @@ export type StockMode = "limited" | "unlimited";
 export type TrolleyStatus = "OPEN" | "CLOSED" | "SOLD";
 export type TrolleyPurpose = "factory" | "direct_sale";
 export type SaleSource = "trolley" | "block_product";
+export type StockUnit = "trolley" | "tumper" | "bori" | "block" | "piece" | "cft" | "other";
 
 export type WusoolHistoryEntry = { amount: number; date: string; note?: string };
 export type WusoolSyncPayload = { amount: number; note?: string; date: string; customerLocalId?: string };
-export type StockHistoryEntry = { qty: number; date: string; buyPrice: number; sellPrice: number; rairi?: number; trolleyPrice?: number };
+export type StockHistoryEntry = { qty: number; date: string; buyPrice: number; sellPrice: number };
 
 export type BillEntry = { label: string; amount: number };
 export type MixMaterialEntry = { 
   label: string; 
   qty: string;
-  rairi: number;
-  rate: number;
+  rairi: number; // Group 2 - rairi touch
+  rate: number; // frozen per rairi
   amount: number;
+  quantity: number; // for Group1 merge compat
+  unit: StockUnit;
   trolleyEntryId?: string;
   batchId?: string;
 };
 
-// --- TROLLEY ---
 export interface OfflineTrolleyEntry {
   localId: string;
   _id?: string;
   date: string;
   material: string;
   normalizedMaterial: string;
-  rairiInTrolley: number;
-  actualRairi?: number;
-  rairiRemaining: number;
-  rairiLoss: number;
+  quantity: number; // trolley count
+  rairiPerTrolley: number; // 60 Maneray, 55 Ghata Shaga
+  totalRairi: number;
+  unit: StockUnit;
   trolleyPrice: number;
   perRairiRate: number;
   status: TrolleyStatus;
   purpose: TrolleyPurpose;
-  totalUsed: number;
   batchId?: string;
-  closedAt?: string;
   userId: string;
   synced: number;
   createdAt: string;
@@ -51,9 +51,15 @@ export interface OfflineTrolleyStock {
   _id?: string;
   material: string;
   normalizedMaterial: string;
+  totalQty: number; // trolley count
+  rairiPerTrolley: number;
   totalRairi: number;
+  usedRairi: number;
+  remainingRairi: number;
   totalCost: number;
   avgRate: number;
+  perRairiRate: number;
+  unit: StockUnit;
   batchId?: string;
   userId: string;
   synced: number;
@@ -61,7 +67,6 @@ export interface OfflineTrolleyStock {
   updatedAt: string;
 }
 
-// --- PRODUCTS --- FIX: rairiPerTrolley 60 / 800
 export interface OfflineBlockProduct {
   localId: string;
   _id?: string;
@@ -69,40 +74,31 @@ export interface OfflineBlockProduct {
   category: BlockCategory;
   stock: number;
   stockMode: StockMode;
+  unit: StockUnit;
   buyPriceAvg: number;
   buyPrice: number;
   sellPrice: number;
   lastPurchaseDate?: string;
-  company?: string;
   userId: string;
   synced: number;
   createdAt: string;
-  lastSyncedAt?: string;
   stockHistory?: StockHistoryEntry[];
   batchId?: string;
-  rairiPerTrolley?: number;
   normalizedName?: string;
-  buyPricePerRairi?: number;
 }
-export type OfflineProduct = OfflineBlockProduct & { rairiPerTrolley?: number };
 
 export interface OfflineSaleItem {
   productId?: string;
-  trolleyEntryId?: string;
   productName: string;
   category: BlockCategory;
   source: SaleSource;
   quantity: number;
-  rairiQty: number;
-  unit: string;
+  unit: StockUnit;
   sellPrice: number;
   buyPrice: number;
-  buyPriceAvg: number;
   totalSell: number;
   totalProfit: number;
   batchId?: string;
-  buyPricePerRairi?: number;
-  rairiPerTrolley?: number;
 }
 
 export interface OfflineBlockDaily {
@@ -143,7 +139,6 @@ export interface OfflineSale {
   isUdhar: boolean;
   status: "paid" | "pending";
   totalQuantity: number;
-  totalRairi: number;
   totalSell: number;
   totalBuy: number;
   totalProfit: number;
@@ -155,10 +150,9 @@ export interface OfflineSale {
   productName: string;
   category: BlockCategory;
   quantity: number;
-  unit?: string;
+  unit?: StockUnit;
   sellPrice: number;
   buyPrice: number;
-  buyPriceAvg: number;
   total: number;
   profit: number;
   batchId?: string;
@@ -200,6 +194,7 @@ export interface MonthlyExpenseLocal {
   totalCementCost: number;
   totalCementBags: number;
   totalTrolleyCost: number;
+  totalRairiUsed: number;
   totalLabourCost: number;
   costPerBlock: number;
   grandCostPerBlock: number;
@@ -222,6 +217,15 @@ export interface SyncQueueItem {
 
 function rnd(n: number): number { return Math.round(n || 0); }
 
+function getRairiForMaterial(name: string): number {
+  const low = name.toLowerCase();
+  if (low.includes("ghata") || low.includes("shaga") || low.includes("گھٹہ") || low.includes("شگہ")) return 55;
+  return 60;
+}
+
+type LegacyStock = OfflineTrolleyStock & { totalRairi?: number; rairiPerUnit?: number; totalQty?: number };
+type LegacyProduct = OfflineBlockProduct & { rairiPerTrolley?: number; buyPricePerRairi?: number; totalRairi?: number };
+
 export class OfflineDB extends Dexie {
   blockProducts!: Table<OfflineBlockProduct, string>;
   sales!: Table<OfflineSale, string>;
@@ -233,46 +237,19 @@ export class OfflineDB extends Dexie {
   trolleyStock!: Table<OfflineTrolleyStock, string>;
 
   get products(): Table<OfflineBlockProduct, string> { return this.blockProducts; }
-  get allTableNames(): string[] { return this.tables.map(t => t.name); }
 
   constructor() {
     super("MansoorBlockFactoryOfflineV1");
 
     this.version(1).stores({
-      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
-      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType",
-      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
-      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType",
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt",
+      sales: "localId, _id, productId, userId, synced, createdAt, date",
+      customers: "localId, _id, name, normalizedName, userId, synced",
+      blockDaily: "localId, _id, userId, synced, date, createdAt",
       syncQueue: "++id, type, localId, createdAt",
     });
 
-    this.version(15).stores({
-      blockProducts: "localId, _id, userId, synced, name, category, createdAt, lastPurchaseDate",
-      sales: "localId, _id, productId, userId, synced, createdAt, date, customerName, status, category, paymentType, invoiceNo",
-      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
-      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksMade, blocksCount",
-      syncQueue: "++id, type, localId, createdAt",
-      monthlyExpenses: "month, _id, userId, synced, createdAt",
-      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date, totalUsed",
-      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt, updatedAt",
-      blockTypes: null,
-      categories: null,
-    });
-
-    this.version(16).stores({
-      blockProducts: "localId, _id, userId, synced, name, category, createdAt, batchId",
-      sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo, batchId",
-      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
-      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, batchId, blocksCount",
-      syncQueue: "++id, type, localId, createdAt",
-      monthlyExpenses: "month, _id, userId, synced, createdAt, batchId",
-      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, batchId, purpose",
-      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, batchId, createdAt",
-      blockTypes: null,
-      categories: null,
-    });
-
-    this.version(19).stores({
+    this.version(22).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
       customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
@@ -281,40 +258,32 @@ export class OfflineDB extends Dexie {
       monthlyExpenses: "month, _id, userId, synced, createdAt",
       trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
       trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
-      blockTypes: null,
-      categories: null,
     }).upgrade(async (tx) => {
-      const productsTable = tx.table("blockProducts");
-      await productsTable.toCollection().modify((p: Record<string, unknown>) => {
-        if (p["rairiPerTrolley"] === undefined) p["rairiPerTrolley"] = 60;
-      });
-    });
-
-    // VERSION 20 - FIX: Rate 2 decimal + API path consistent
-    this.version(20).stores({
-      blockProducts: "localId, _id, userId, synced, name, category, createdAt",
-      sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
-      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
-      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksCount",
-      syncQueue: "++id, type, localId, createdAt",
-      monthlyExpenses: "month, _id, userId, synced, createdAt",
-      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
-      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
-      blockTypes: null,
-      categories: null,
-    }).upgrade(async (tx) => {
-      // Fix old long decimal rates
-      const tEntries = tx.table("trolleyEntries");
-      await tEntries.toCollection().modify((e: Record<string, unknown>) => {
-        if (e["perRairiRate"] !== undefined) {
-          e["perRairiRate"] = Number(Number(e["perRairiRate"]).toFixed(2));
-        }
-        if (e["rairiPerTrolley"] === undefined) e["rairiPerTrolley"] = 60;
-      });
       const tStock = tx.table("trolleyStock");
-      await tStock.toCollection().modify((s: Record<string, unknown>) => {
-        if (s["avgRate"] !== undefined) {
-          s["avgRate"] = Number(Number(s["avgRate"]).toFixed(2));
+      await tStock.toCollection().modify((raw: unknown) => {
+        const s = raw as LegacyStock;
+        if (!s.rairiPerTrolley) s.rairiPerTrolley = getRairiForMaterial(s.material || "");
+        const qty = s.totalQty || 0;
+        if (!s.totalRairi || s.totalRairi === 0) {
+          s.totalRairi = Math.round(qty * s.rairiPerTrolley);
+        }
+        s.usedRairi = s.usedRairi || 0;
+        s.remainingRairi = Math.max(0, (s.totalRairi || 0) - (s.usedRairi || 0));
+        if (s.avgRate && !s.perRairiRate) {
+          s.perRairiRate = Number((s.avgRate / s.rairiPerTrolley).toFixed(2));
+        }
+        s.unit = s.unit || "trolley";
+      });
+
+      const products = tx.table("blockProducts");
+      await products.toCollection().modify((raw: unknown) => {
+        const p = raw as LegacyProduct;
+        const delKeys = ["rairiPerTrolley", "buyPricePerRairi", "totalRairi"] as const;
+        for (const k of delKeys) {
+          delete (p as unknown as Record<string, unknown>)[k];
+        }
+        if (p.unit === "other" as unknown as StockUnit) {
+          p.unit = "trolley";
         }
       });
     });
@@ -338,63 +307,22 @@ export function mergeMixMaterialsOffline(mixes: MixMaterialEntry[]): MixMaterial
     const exist = map.get(norm);
     if (exist) {
       exist.rairi = rnd(exist.rairi + m.rairi);
+      exist.quantity = rnd(exist.quantity + m.quantity);
       exist.amount = rnd(exist.amount + m.amount);
-      exist.qty = `${exist.rairi} ریڑھی`;
+      exist.qty = `${exist.rairi} rairi`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی` });
+      map.set(norm, { ...m });
     }
   }
   return Array.from(map.values());
 }
 
-export async function deductTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
-  for (const m of mixes) {
-    const rairi = rnd(m.rairi);
-    if (rairi <= 0) continue;
-    let entry: OfflineTrolleyEntry | undefined;
-    if (m.trolleyEntryId) {
-      entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
-    }
-    if (!entry) {
-      const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
-      entry = all.filter(e => e.status === "OPEN").sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
-    }
-    if (entry) {
-      const newUsed = rnd(entry.totalUsed + rairi);
-      const remaining = Math.max(0, (entry.actualRairi || entry.rairiInTrolley) - newUsed);
-      await offlineDB.trolleyEntries.update(entry.localId, { totalUsed: newUsed, rairiRemaining: remaining, synced: 0 });
-      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(entry.normalizedMaterial).first();
-      if (stock) {
-        const newRairi = Math.max(0, rnd(stock.totalRairi - rairi));
-        await offlineDB.trolleyStock.update(stock.localId, { totalRairi: newRairi, updatedAt: new Date().toISOString(), synced: 0 });
-      }
-    }
-  }
+export async function deductTrolleyOffline(_mixes: MixMaterialEntry[]): Promise<void> {
+  console.log("Deduct disabled - trolley, blockDaily, products are separate modules now");
 }
 
-export async function revertTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
-  for (const m of mixes) {
-    const rairi = rnd(m.rairi);
-    if (rairi <= 0) continue;
-    let entry: OfflineTrolleyEntry | undefined;
-    if (m.trolleyEntryId) {
-      entry = await offlineDB.trolleyEntries.where("localId").equals(m.trolleyEntryId).first();
-    }
-    if (!entry) {
-      const all = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(m.label.toLowerCase().trim()).toArray();
-      entry = all.filter(e => (e.totalUsed || 0) >= 1).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-    }
-    if (entry) {
-      const newUsed = Math.max(0, rnd(entry.totalUsed - rairi));
-      const remaining = Math.max(0, (entry.actualRairi || entry.rairiInTrolley) - newUsed);
-      await offlineDB.trolleyEntries.update(entry.localId, { totalUsed: newUsed, rairiRemaining: remaining, synced: 0 });
-      const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(entry.normalizedMaterial).first();
-      if (stock) {
-        const newRairi = rnd(stock.totalRairi + rairi);
-        await offlineDB.trolleyStock.update(stock.localId, { totalRairi: newRairi, updatedAt: new Date().toISOString(), synced: 0 });
-      }
-    }
-  }
+export async function revertTrolleyOffline(_mixes: MixMaterialEntry[]): Promise<void> {
+  console.log("Revert disabled - modules are separate now");
 }
 
 export async function upsertOfflineCustomer(sale: OfflineSale, village = "", phone = ""): Promise<string | null> {

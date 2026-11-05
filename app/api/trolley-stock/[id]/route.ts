@@ -19,6 +19,13 @@ type UpdateBody = {
   purpose?: "factory" | "direct_sale";
 };
 
+interface TrolleyLean {
+  actualRairi?: number;
+  rairiInTrolley: number;
+  totalUsed?: number;
+  perRairiRate?: number;
+}
+
 function rnd(n: number): number {
   return Math.round(Number(n) || 0);
 }
@@ -26,11 +33,18 @@ function isValidId(id: string): boolean {
   return Types.ObjectId.isValid(id);
 }
 
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+
+function getUserFilter(userId: string): UserFilter {
+  if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  return { userId: userId };
+}
+
 async function recalcStock(userId: string, normalizedMaterial: string) {
   const all = await TrolleyEntryModel.find({
-    userId: userId,
+    ...getUserFilter(userId),
     normalizedMaterial: normalizedMaterial,
-  }).lean();
+  }).lean<TrolleyLean[]>();
 
   let totalRairi = 0;
   let totalCost = 0;
@@ -42,7 +56,7 @@ async function recalcStock(userId: string, normalizedMaterial: string) {
   }
   const avgRate = totalRairi > 0 ? Number((totalCost / totalRairi).toFixed(2)) : 0;
   await TrolleyStockModel.updateOne(
-    { userId: userId, normalizedMaterial: normalizedMaterial },
+    { ...getUserFilter(userId), normalizedMaterial: normalizedMaterial },
     { $set: { totalRairi: rnd(totalRairi), totalCost: rnd(totalCost), avgRate, updatedAt: new Date() } },
     { upsert: true }
   );
@@ -73,9 +87,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const userId = session?.user?.id;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const filter = getUserFilter(userId);
   let entry = null;
-  if (isValidId(id)) entry = await TrolleyEntryModel.findOne({ _id: id, userId: userId });
-  if (!entry) entry = await TrolleyEntryModel.findOne({ localId: id, userId: userId });
+  if (isValidId(id)) entry = await TrolleyEntryModel.findOne({ _id: id, ...filter });
+  if (!entry) entry = await TrolleyEntryModel.findOne({ localId: id, ...filter });
   if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (body.material) {
@@ -113,9 +128,10 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const userId = session?.user?.id;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const filter = getUserFilter(userId);
   let entry = null;
-  if (isValidId(id)) entry = await TrolleyEntryModel.findOne({ _id: id, userId: userId });
-  if (!entry) entry = await TrolleyEntryModel.findOne({ localId: id, userId: userId });
+  if (isValidId(id)) entry = await TrolleyEntryModel.findOne({ _id: id, ...filter });
+  if (!entry) entry = await TrolleyEntryModel.findOne({ localId: id, ...filter });
   if (!entry) return NextResponse.json({ ok: true, message: "Already deleted" });
 
   const normalized = entry.normalizedMaterial;

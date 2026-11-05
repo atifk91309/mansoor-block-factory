@@ -13,25 +13,53 @@ export const runtime = "nodejs";
 
 type BillBody = { label: string; amount: number };
 type MixBody = { label: string; qty?: string; rairi: number; rate: number; amount?: number; trolleyEntryId?: string; batchId?: string };
-type MixForRevert = { rairi?: number; label?: string; trolleyEntryId?: string; batchId?: string };
+type MixForRevert = { rairi?: number; label?: string; trolleyEntryId?: string };
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
-function getUserFilter(userId: string): Record<string, unknown> {
+
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+
+function getUserFilter(userId: string): UserFilter {
   if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
   return { userId: userId };
 }
 
+interface TrolleyLean {
+  _id: Types.ObjectId;
+  material: string; 
+  normalizedMaterial: string;
+  rairiInTrolley?: number;
+  actualRairi?: number;
+  totalUsed?: number; 
+  perRairiRate?: number;
+}
+
+interface DailyOld {
+  blocksMade: string;
+  blocksCount: number;
+  date: Date;
+  ratePerBlock?: number;
+  mazdoorRatePerBlock?: number;
+  cementBags?: number;
+  cementRate?: number;
+  cementCost?: number;
+  blockType?: string;
+  bills?: BillBody[];
+  mixMaterials?: MixBody[];
+  isMonthlyElectricity?: boolean;
+  batchId?: string;
+}
+
 async function recalcAllStocks(userId: string): Promise<void> {
-  const allEntries = await TrolleyEntryModel.find({ ...getUserFilter(userId) }).lean() as unknown as Array<{
-    material: string; normalizedMaterial: string;
-    rairiInTrolley: number; actualRairi?: number;
-    totalUsed?: number; perRairiRate?: number;
-  }>;
+  const allEntries = await TrolleyEntryModel.find({ 
+    ...getUserFilter(userId) 
+  }).lean<TrolleyLean[]>();
+  
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of allEntries) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley);
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
     cur.rairi += rem;
@@ -122,7 +150,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const daily = await BlockDaily.findOne({ _id: id, userId: session.user.id }).lean();
+    const daily = await BlockDaily.findOne({ _id: id, userId: session.user.id }).lean<DailyOld>();
     if (!daily) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(daily);
   } catch { return NextResponse.json({ error: "Failed" }, { status: 500 }); }
@@ -135,7 +163,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const userId = session.user.id;
-    const daily = await BlockDaily.findOne({ _id: id, userId: userId });
+    const daily = await BlockDaily.findOne({ _id: id, userId: userId }).lean<DailyOld>();
     if (!daily) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const existing = await BlockProduct.findOne({
@@ -147,7 +175,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await BlockProduct.updateOne({ _id: existing._id }, { $set: { stock: newStock } });
     }
 
-    await revertTrolleyUsage(userId, (daily.mixMaterials as unknown as MixForRevert[]) || []);
+    await revertTrolleyUsage(userId, daily.mixMaterials || []);
     await BlockDaily.deleteOne({ _id: id });
 
     const d = daily.date ? new Date(daily.date) : new Date();
@@ -170,7 +198,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       mazdoorRatePerBlock?: number; ratePerBlock?: number; blockType?: string; date?: string;
       bills?: BillBody[]; mixMaterials?: MixBody[]; isMonthlyElectricity?: boolean; batchId?: string;
     };
-    const old = await BlockDaily.findOne({ _id: id, userId: userId });
+    const old = await BlockDaily.findOne({ _id: id, userId: userId }).lean<DailyOld>();
     if (!old) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const newCount = rnd(body.blocksCount ?? old.blocksCount);
@@ -178,13 +206,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const diff = newCount - rnd(old.blocksCount);
     const isNameChanged = newName.toLowerCase() !== old.blocksMade.toLowerCase();
     
-    const mazdoorRate = rnd(body.mazdoorRatePerBlock ?? (body.ratePerBlock as number) ?? (old as unknown as { mazdoorRatePerBlock: number }).mazdoorRatePerBlock ?? old.ratePerBlock ?? 3);
-    const cementBags = rnd(body.cementBags ?? (old as unknown as { cementBags: number }).cementBags ?? 0);
-    const cementRate = rnd(body.cementRate ?? (old as unknown as { cementRate: number }).cementRate ?? 1400);
+    const mazdoorRate = rnd(body.mazdoorRatePerBlock ?? body.ratePerBlock ?? old.mazdoorRatePerBlock ?? old.ratePerBlock ?? 3);
+    const cementBags = rnd(body.cementBags ?? old.cementBags ?? 0);
+    const cementRate = rnd(body.cementRate ?? old.cementRate ?? 1400);
     const cementCost = rnd(body.cementCost ?? cementBags * cementRate);
 
-    const cleanBills: BillBody[] = (body.bills ?? (old.bills as unknown as BillBody[]) ?? []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
-    let cleanMix: MixBody[] = (body.mixMaterials ?? (old.mixMaterials as unknown as MixBody[]) ?? []).filter((m) => m.label?.trim() && (m.rairi || 0) > 0).map((m) => ({
+    const cleanBills: BillBody[] = (body.bills ?? old.bills ?? []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
+    let cleanMix: MixBody[] = (body.mixMaterials ?? old.mixMaterials ?? []).filter((m) => m.label?.trim() && (m.rairi || 0) > 0).map((m) => ({
       label: m.label.trim(), qty: m.qty?.trim() || `${rnd(m.rairi || 0)} ریڑھی`, rairi: rnd(m.rairi || 0), rate: rnd(m.rate || 0),
       amount: rnd(m.amount || rnd(m.rairi || 0) * rnd(m.rate || 0)), trolleyEntryId: m.trolleyEntryId?.trim(), batchId: m.batchId
     }));
@@ -200,7 +228,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const labourCost = rnd(newCount * mazdoorRate);
     const totalBill = labourCost + extraBills + mixCost;
 
-    await revertTrolleyUsage(userId, (old.mixMaterials as unknown as MixForRevert[]) || []);
+    await revertTrolleyUsage(userId, old.mixMaterials || []);
 
     const updated = await BlockDaily.findOneAndUpdate(
       { _id: id },
@@ -208,13 +236,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         blocksMade: newName, blocksCount: newCount, 
         cementBags, cementRate, cementCost,
         mazdoorRatePerBlock: mazdoorRate, ratePerBlock: mazdoorRate, labourCost,
-        dailyWages: labourCost, blockType: body.blockType || old.blockType,
+        dailyWages: labourCost, blockType: body.blockType || old.blockType || "6 inch",
         date: body.date ? new Date(body.date) : old.date, 
         bills: cleanBills, mixMaterials: cleanMix, 
         trolleyMixCost, mixCost, totalBill,
         costPerBlock: newCount > 0 ? Math.round((totalBill / newCount) * 100) / 100 : 0,
         isMonthlyElectricity: body.isMonthlyElectricity ?? old.isMonthlyElectricity ?? false,
-        batchId: body.batchId || (old as unknown as { batchId?: string }).batchId,
+        batchId: body.batchId || old.batchId,
       },
       { new: true }
     );

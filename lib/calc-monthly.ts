@@ -12,6 +12,7 @@ interface RecalcResult {
   totalCementCost: number;
   totalCementBags: number;
   totalTrolleyCost: number;
+  totalRairiUsed: number;
   totalLabourCost: number;
   totalWages: number;
   totalMonthly: number;
@@ -20,7 +21,9 @@ interface RecalcResult {
   trueCostPerBlock: number;
 }
 
-function getUserFilter(userId: UserId): Record<string, unknown> {
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+
+function getUserFilter(userId: UserId): UserFilter {
   if (typeof userId === "string" && !mongoose.Types.ObjectId.isValid(userId)) {
     return { userId: userId };
   }
@@ -40,7 +43,6 @@ export async function recalcMonthlyExpense(
 
   const userFilter = getUserFilter(userId);
 
-  // NO batchId filter - show all data whether batch exists or not
   const dailies = await BlockDailyModel.find({
     ...userFilter,
     date: { $gte: startPK, $lt: endPK },
@@ -49,25 +51,18 @@ export async function recalcMonthlyExpense(
   const totalBlocks = dailies.reduce((s, d) => s + (d.blocksCount || 0), 0);
   const totalDailyBill = dailies.reduce((s, d) => s + (d.totalBill || 0), 0);
   
-  const totalCementCost = dailies.reduce((s, d) => {
-    const doc = d as IBlockDaily & { cementCost?: number };
-    return s + (doc.cementCost || 0);
+  const totalCementCost = dailies.reduce((s, d) => s + (d.cementCost || 0), 0);
+  const totalCementBags = dailies.reduce((s, d) => s + (d.cementBags || 0), 0);
+  
+  const totalTrolleyCost = dailies.reduce((s, d) => s + (d.trolleyMixCost || 0), 0);
+  
+  // Rairi touch - Group 2 ka main field
+  const totalRairiUsed = dailies.reduce((s, d) => {
+    const rairiInDay = d.mixMaterials.reduce((ms, mm) => ms + (mm.rairi || 0), 0);
+    return s + rairiInDay;
   }, 0);
   
-  const totalCementBags = dailies.reduce((s, d) => {
-    const doc = d as IBlockDaily & { cementBags?: number };
-    return s + (doc.cementBags || 0);
-  }, 0);
-  
-  const totalTrolleyCost = dailies.reduce((s, d) => {
-    const doc = d as IBlockDaily & { trolleyMixCost?: number };
-    return s + (doc.trolleyMixCost || d.mixCost || 0);
-  }, 0);
-  
-  const totalLabourCost = dailies.reduce((s, d) => {
-    const doc = d as IBlockDaily & { labourCost?: number };
-    return s + (doc.labourCost || d.dailyWages || 0);
-  }, 0);
+  const totalLabourCost = dailies.reduce((s, d) => s + (d.labourCost || d.dailyWages || 0), 0);
 
   const totalMixCost = totalCementCost + totalTrolleyCost;
   const totalWages = totalLabourCost;
@@ -104,6 +99,7 @@ export async function recalcMonthlyExpense(
         totalCementCost,
         totalCementBags,
         totalTrolleyCost,
+        totalRairiUsed,
         totalLabourCost,
         totalMonthly,
         costPerBlock,
@@ -126,6 +122,7 @@ export async function recalcMonthlyExpense(
     totalCementCost,
     totalCementBags,
     totalTrolleyCost,
+    totalRairiUsed,
     totalLabourCost,
     totalWages,
     totalMonthly: updated?.totalMonthly ?? totalMonthly,
@@ -139,7 +136,6 @@ export async function recalcDailiesAfterTrolleyClose(
   userId: UserId,
   trolleyEntryId: string,
   newRate: number,
-  
 ): Promise<void> {
   const dailies = await BlockDailyModel.find({
     ...getUserFilter(userId),
@@ -183,5 +179,5 @@ export async function closeBatchAndStartNew(
   oldBatchId: string,
   newBatchId: string
 ): Promise<void> {
-  console.log(`Batch ${oldBatchId} closed, new batch ${newBatchId} started for user ${userId} - No Batch logic now, all data shown`);
+  console.log(`Batch ${oldBatchId} closed, new batch ${newBatchId} started - No Batch logic now`);
 }

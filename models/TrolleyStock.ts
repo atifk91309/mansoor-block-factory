@@ -18,7 +18,7 @@ export interface ITrolleyEntry extends Document {
   
   status: TrolleyStatus;
   purpose: TrolleyPurpose;
-  totalUsed: number;
+  totalUsed: number; // kitni rairi block me use hui
   batchId?: string;
   closedAt?: Date;
   
@@ -31,7 +31,7 @@ export interface ITrolleyEntry extends Document {
 export interface ITrolleyStock extends Document {
   material: string;
   normalizedMaterial: string;
-  totalRairi: number;
+  totalRairi: number; // total rairi available
   totalCost: number;
   avgRate: number;
   batchId?: string;
@@ -41,14 +41,15 @@ export interface ITrolleyStock extends Document {
   updatedAt: Date;
 }
 
+// Material wise rairi fix
 function getRairiForMaterial(name: string): number {
   const n = name.toLowerCase().trim();
   if (n.includes("منیرے") || n.includes("maneray") || n.includes("meneray")) return 60;
   if (n.includes("ترکے") || n.includes("tarakay") || n.includes("tarkay")) return 60;
   if (n.includes("پن") || n.includes("pin")) return 60;
-  if (n.includes("گھٹہ") || n.includes("ghata")) return 55;
+  if (n.includes("گھٹہ") || n.includes("ghata") || n.includes("شگہ") || n.includes("shaga")) return 55;
   if (n.includes("نرے") || n.includes("naray") || n.includes("شینہ") || n.includes("کھڑا")) return 60;
-  if (n.includes("کنکر") || n.includes("concar") || n.includes("ریت") || n.includes("rait")) return 60;
+  if (n.includes("کنکر") || n.includes("concar") || n.includes("ریت") || n.includes("rait") || n.includes("bajri") || n.includes("بجری")) return 60;
   return 60;
 }
 
@@ -108,6 +109,8 @@ TrolleyEntrySchema.pre("save", function(this: ITrolleyEntry) {
   this.rairiRemaining = Math.max(0, effectiveRairi - (this.totalUsed || 0));
   if (this.actualRairi) {
     this.rairiLoss = Math.max(0, this.rairiInTrolley - this.actualRairi);
+  } else {
+    this.rairiLoss = 0;
   }
   if (this.status === "CLOSED" && this.actualRairi && this.actualRairi > 0) {
     this.perRairiRate = this.trolleyPrice / this.actualRairi;
@@ -116,6 +119,10 @@ TrolleyEntrySchema.pre("save", function(this: ITrolleyEntry) {
   }
   if (this.status === "CLOSED" && !this.closedAt) {
     this.closedAt = new Date();
+  }
+  // normalized
+  if (!this.normalizedMaterial) {
+    this.normalizedMaterial = this.material.toLowerCase().trim();
   }
 });
 

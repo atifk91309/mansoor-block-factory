@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { offlineDB } from "@/lib/offline-db";
 
-type SaleItem = { productName: string; category: string; quantity: number; sellPrice: number; buyPrice: number; totalSell: number; totalProfit: number };
+type SaleItem = { productName: string; category: string; quantity: number; unit?: string; sellPrice: number; buyPrice: number; totalSell?: number; totalProfit?: number };
 
 type Sale = {
   _id: string;
@@ -34,6 +34,7 @@ type OfflineSaleDb = {
   total: number;
   profit: number;
   quantity: number;
+  unit?: string;
   paymentType: string;
   isUdhar?: boolean;
   status?: string;
@@ -118,7 +119,7 @@ export default function SalesHistoryPage() {
               isUdhar: o.paymentType === "udhar" || !!o.isUdhar,
               createdAt: o.createdAt,
               date: o.createdAt,
-              items: o.items || [{ productName: o.productName, category: o.category, quantity: o.quantity, sellPrice: o.sellPrice, buyPrice: 0, totalSell: o.total, totalProfit: o.profit }],
+              items: o.items || [{ productName: o.productName, category: o.category, quantity: o.quantity, unit: o.unit || "trolley", sellPrice: o.sellPrice, buyPrice: 0 }],
             }))
           );
           const t = filtered.reduce((a, b) => a + (b.totalSell || b.total), 0);
@@ -133,7 +134,6 @@ export default function SalesHistoryPage() {
           return;
         }
         const statusQ = status === "pending" ? "&paymentType=udhar" : status === "paid" ? "&paymentType=cash" : "";
-        // No Batch - no batchId param
         const res = await fetch(`/api/sales?filter=${f}&search=${encodeURIComponent(s)}&page=${p}&limit=20${statusQ}`);
         const data = (await res.json()) as SalesApiResponse;
         const filteredSales = data.sales || [];
@@ -189,8 +189,8 @@ export default function SalesHistoryPage() {
       <div className="flex justify-between mb-4 gap-2">
         <div>
           <Link href="/dashboard/sales" className="text-[11px] text-gray-500">← فروخت</Link>
-          <h1 className="text-[17px] font-bold">🧱 منصور فروخت تاریخ - No Batch</h1>
-          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} بل • {total.toLocaleString()} روپے • منافع {profit.toLocaleString()} روپے • شیوہ روڈ</p>
+          <h1 className="text-[17px] font-bold">🧱 منصور فروخت تاریخ - No Rairi</h1>
+          <p className="text-[11px] text-gray-500">{filter.toUpperCase()} • {pagination.totalCount} بل • {total.toLocaleString()} روپے • منافع {profit.toLocaleString()} روپے</p>
         </div>
         <Link href="/dashboard/sales" className="bg-black text-white px-4 py-2 rounded-xl text-[12px] h-fit">+ نئی فروخت</Link>
       </div>
@@ -214,7 +214,7 @@ export default function SalesHistoryPage() {
       ) : (
         <div className="space-y-3">
           {Object.keys(grouped).length === 0 ? (
-            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">کوئی فروخت نہیں — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""} • شیوہ روڈ فیکٹری</p>
+            <p className="text-center py-10 bg-white rounded-xl border text-[12px]">کوئی فروخت نہیں — {filter} {statusFilter !== "all" ? `• ${statusFilter}` : ""}</p>
           ) : (
             Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])).map(([date, daySales]) => {
               const dt = daySales.reduce((a, b) => a + b.totalSell, 0);
@@ -225,10 +225,10 @@ export default function SalesHistoryPage() {
                   {daySales.map((s) => (
                     <div key={s._id} className={`px-3 py-2.5 flex justify-between text-[12px] border-b last:border-0 ${s.isUdhar ? "bg-red-50/50" : ""}`}>
                       <div>
-                        <p className="font-medium">{s.invoiceNo} • {s.customerName} • {s.items[0]?.productName || "بلاک"} x{s.totalQuantity} {s.isUdhar ? <span className="bg-red-600 text-white px-2 rounded-full text-[9px]">ادھار</span> : <span className="bg-green-100 px-2 rounded-full text-[9px]">نقد</span>}</p>
-                        <p className="text-[10px] text-gray-400">{s.items.map(i => `${i.productName} ${i.quantity}`).join(", ")} • منافع {s.totalProfit} روپے • {new Date(s.createdAt).toLocaleTimeString()} • {s.items[0]?.category || "block"}</p>
+                        <p className="font-medium">{s.invoiceNo} • {s.customerName} • {s.items[0]?.productName || "بلاک"} x{s.totalQuantity} {s.items[0]?.unit || "block"} {s.isUdhar ? <span className="bg-red-600 text-white px-2 rounded-full text-[9px]">ادھار</span> : <span className="bg-green-100 px-2 rounded-full text-[9px]">نقد</span>}</p>
+                        <p className="text-[10px] text-gray-400">{s.items.map(i => `${i.productName} ${i.quantity}${i.unit || ""}`).join(", ")} • منافع {s.totalProfit} Rs • {new Date(s.createdAt).toLocaleTimeString()} • {s.items[0]?.category || "block"}</p>
                       </div>
-                      <span className="font-bold">{s.totalSell.toLocaleString()} روپے</span>
+                      <span className="font-bold">{s.totalSell.toLocaleString()} Rs</span>
                     </div>
                   ))}
                 </div>
@@ -238,7 +238,7 @@ export default function SalesHistoryPage() {
           {pagination.hasMore && <button onClick={() => setPage((p) => p + 1)} className="w-full py-2.5 bg-white border rounded-xl text-[12px]">مزید لوڈ کریں ({pagination.totalCount - sales.length})</button>}
         </div>
       )}
-      <div className="mt-4 bg-black text-white p-4 rounded-xl flex justify-between"><div><p className="text-[12px] opacity-70">کل {filter} • {pagination.totalCount} بل • بلاک + ریت</p><p className="text-[11px] opacity-60">منافع {profit.toLocaleString()} روپے • ادھار باقی {pendingTotal.toLocaleString()} روپے</p></div><span className="text-[20px] font-bold">{total.toLocaleString()} روپے</span></div>
+      <div className="mt-4 bg-black text-white p-4 rounded-xl flex justify-between"><div><p className="text-[12px] opacity-70">کل {filter} • {pagination.totalCount} بل • No Rairi - {`trolley/tumper/bori/block`}</p><p className="text-[11px] opacity-60">منافع {profit.toLocaleString()} Rs • ادھار باقی {pendingTotal.toLocaleString()} Rs</p></div><span className="text-[20px] font-bold">{total.toLocaleString()} Rs</span></div>
     </div>
   );
 }

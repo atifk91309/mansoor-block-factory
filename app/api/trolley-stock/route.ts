@@ -3,7 +3,7 @@ import { TrolleyEntryModel, TrolleyStockModel } from "@/models/TrolleyStock";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
- 
+import { Types } from "mongoose";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,6 +19,23 @@ function isValidStatus(s: string | null): s is TrolleyStatus {
   return s !== null && (VALID_STATUSES as string[]).includes(s);
 }
 
+type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
+type EntryFilter = UserFilter & { status?: TrolleyStatus };
+
+function getUserFilter(userId: string): UserFilter {
+  if (Types.ObjectId.isValid(userId)) {
+    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  }
+  return { userId: userId };
+}
+
+function getRairiForMaterial(name: string): number {
+  const nm = name.toLowerCase().trim();
+  if (nm.includes("گھٹہ") || nm.includes("ghata") || nm.includes("گھٹہ شگہ")) return 55;
+  if (nm.includes("بجری") || nm.includes("bajri") || nm.includes("crush")) return 55;
+  return 60;
+}
+
 export async function GET(req: NextRequest) {
   await connectDB();
   const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
@@ -26,19 +43,14 @@ export async function GET(req: NextRequest) {
   if (!userId) return NextResponse.json({ data: [], stock: [] });
 
   const statusParam = req.nextUrl.searchParams.get("status");
-
-  // FIX: status ko sirf valid hone pe filter me add karo, warna string error aata hai
-  const entryFilter: { userId: string; status?: TrolleyStatus } = {
-    userId: userId,
-  };
+  const base = getUserFilter(userId);
+  const entryFilter: EntryFilter = { ...base } as EntryFilter;
   if (isValidStatus(statusParam)) {
     entryFilter.status = statusParam;
   }
 
-  // FIX: $or hata diya — seedha userId se search, Mongoose khud ObjectId cast kar deta hai
-  // Is se TS2769 overload error khatam ho jayega
   const entries = await TrolleyEntryModel.find(entryFilter).sort({ date: -1 }).limit(200).lean();
-  const stock = await TrolleyStockModel.find({ userId: userId }).sort({ updatedAt: -1 }).lean();
+  const stock = await TrolleyStockModel.find({ ...getUserFilter(userId) }).sort({ updatedAt: -1 }).lean();
 
   return NextResponse.json({ data: entries, stock, entries });
 }
@@ -60,13 +72,6 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
 
   if (!body.material?.trim()) return NextResponse.json({ error: "material required" }, { status: 400 });
-
-  const getRairiForMaterial = (name: string): number => {
-    const nm = name.toLowerCase().trim();
-    if (nm.includes("گھٹہ") || nm.includes("ghata")) return 55;
-    if (nm.includes("بجری") || nm.includes("bajri")) return 55;
-    return 60;
-  };
 
   const rairiInput = rnd(body.rairiInTrolley) || getRairiForMaterial(body.material);
   const actualRairi = body.actualRairi !== undefined ? rnd(body.actualRairi) : rairiInput;
@@ -98,7 +103,7 @@ export async function POST(req: NextRequest) {
   });
 
   const existingStock = await TrolleyStockModel.findOne({
-    userId: userId,
+    ...getUserFilter(userId),
     normalizedMaterial: normalized,
   });
 
