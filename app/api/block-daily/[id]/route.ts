@@ -17,55 +17,28 @@ type MixForRevert = { rairi?: number; label?: string; trolleyEntryId?: string };
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
 
-type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
-
-function getUserFilter(userId: string): UserFilter {
+function getUserFilter(userId: string) {
   if (Types.ObjectId.isValid(userId)) return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
   return { userId: userId };
-}
-
-interface TrolleyLean {
-  _id: Types.ObjectId;
-  material: string; 
-  normalizedMaterial: string;
-  rairiInTrolley?: number;
-  rairiPerTrolley?: number;
-  actualRairi?: number;
-  totalUsed?: number; 
-  perRairiRate?: number;
-}
-
-interface DailyOld {
-  blocksMade: string;
-  blocksCount: number;
-  date: Date;
-  ratePerBlock?: number;
-  mazdoorRatePerBlock?: number;
-  cementBags?: number;
-  cementRate?: number;
-  cementCost?: number;
-  blockType?: string;
-  bills?: BillBody[];
-  mixMaterials?: MixBody[];
-  isMonthlyElectricity?: boolean;
-  batchId?: string;
 }
 
 async function recalcAllStocks(userId: string): Promise<void> {
   const allEntries = await TrolleyEntryModel.find({ 
     ...getUserFilter(userId) 
-  }).lean<TrolleyLean[]>();
+  }).lean();
   
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of allEntries) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? e.rairiPerTrolley ?? 0);
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
     if (rem <= 0) continue;
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
+    // ✅ ASAL RATE
+    const rate = Number((e.perRairiRate || 0).toFixed(2));
     cur.rairi += rem;
-    cur.cost += rem * Number(e.perRairiRate ?? 0);
+    cur.cost += rem * rate;
     map.set(norm, cur);
   }
   for (const [norm, v] of map) {
@@ -80,8 +53,7 @@ async function recalcAllStocks(userId: string): Promise<void> {
       { upsert: true }
     );
   }
-  // ✅ 0 wale auto-delete
-  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean() as unknown as { normalizedMaterial: string; totalRairi: number }[];
+  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean();
   const existingNorms = allStocks.map(s => s.normalizedMaterial);
   const toDelete = existingNorms.filter(n => !map.has(n));
   if (toDelete.length > 0) {
@@ -120,22 +92,36 @@ async function applyTrolleyUsage(userId: string, mixes: MixBody[]): Promise<void
     if (rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();
     let deducted = false;
+
     if (mix.trolleyEntryId) {
       const updated = await TrolleyEntryModel.findOneAndUpdate(
-        { ...getUserFilter(userId), localId: mix.trolleyEntryId, status: "OPEN" },
+        { ...getUserFilter(userId), localId: mix.trolleyEntryId },
         { $inc: { totalUsed: rairi } }
       );
       if (updated) deducted = true;
     }
+
     if (!deducted) {
-      const oldestOpen = await TrolleyEntryModel.findOne({ 
-        ...getUserFilter(userId), normalizedMaterial: normalized, status: "OPEN" 
-      }).sort({ date: 1 });
-      if (oldestOpen) await TrolleyEntryModel.updateOne({ _id: oldestOpen._id }, { $inc: { totalUsed: rairi } });
+      const allForMat = await TrolleyEntryModel.find({
+        ...getUserFilter(userId),
+        normalizedMaterial: normalized,
+      }).sort({ date: 1 }).lean();
+
+      let need = rairi;
+      for (const ent of allForMat) {
+        if (need <= 0) break;
+        const eff = rnd(ent.actualRairi ?? ent.rairiInTrolley ?? 0);
+        const rem = Math.max(0, eff - rnd(ent.totalUsed ?? 0));
+        if (rem <= 0) continue;
+        const use = Math.min(rem, need);
+        await TrolleyEntryModel.updateOne({ _id: ent._id }, { $inc: { totalUsed: use } });
+        need -= use;
+        deducted = true;
+      }
     }
   }
   await recalcAllStocks(userId);
-}
+} 
 
 function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
   const map = new Map<string, MixBody>();
@@ -143,12 +129,11 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
     const norm = m.label.toLowerCase().trim();
     const existing = map.get(norm);
     if (existing) {
-      // ✅ frozen rate keep
       existing.rairi = rnd(existing.rairi + m.rairi);
       existing.amount = rnd((existing.amount ?? 0) + (m.amount ?? 0));
       existing.qty = `${existing.rairi} ریڑھی`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number(Number(m.rate || 0).toFixed(2)) });
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number((m.rate || 0).toFixed(2)) });
     }
   }
   return Array.from(map.values());
@@ -158,9 +143,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     await connectDB();
     const { id } = await params;
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const daily = await BlockDaily.findOne({ _id: id, userId: session.user.id }).lean<DailyOld>();
+    const daily = await BlockDaily.findOne({ _id: id, userId: session.user.id }).lean();
     if (!daily) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(daily);
   } catch { return NextResponse.json({ error: "Failed" }, { status: 500 }); }
@@ -170,10 +155,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     await connectDB();
     const { id } = await params;
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const userId = session.user.id;
-    const daily = await BlockDaily.findOne({ _id: id, userId: userId }).lean<DailyOld>();
+    const daily = await BlockDaily.findOne({ _id: id, userId: userId }).lean();
     if (!daily) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const existing = await BlockProduct.findOne({
@@ -200,7 +185,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     await connectDB();
     const { id } = await params;
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const userId = session.user.id;
     const body = await req.json() as {
@@ -208,7 +193,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       mazdoorRatePerBlock?: number; ratePerBlock?: number; blockType?: string; date?: string;
       bills?: BillBody[]; mixMaterials?: MixBody[]; isMonthlyElectricity?: boolean; batchId?: string;
     };
-    const old = await BlockDaily.findOne({ _id: id, userId: userId }).lean<DailyOld>();
+    const old = await BlockDaily.findOne({ _id: id, userId: userId }).lean();
     if (!old) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const newCount = rnd(body.blocksCount ?? old.blocksCount);
@@ -223,13 +208,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const cleanBills: BillBody[] = (body.bills ?? old.bills ?? []).filter((b) => b.label?.trim()).map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
     
-    // ✅ FROZEN - edit pe bhi rate preserve, 2 decimal
     let cleanMix: MixBody[] = (body.mixMaterials ?? old.mixMaterials ?? []).filter((m) => m.label?.trim() && (m.rairi || 0) > 0).map((m) => ({
       label: m.label.trim(), 
       qty: m.qty?.trim() || `${rnd(m.rairi || 0)} ریڑھی`, 
       rairi: rnd(m.rairi || 0), 
-      rate: Number(Number(m.rate || 0).toFixed(2)), // frozen 216.67 keep
-      amount: rnd(m.amount || rnd(m.rairi || 0) * Number(Number(m.rate || 0).toFixed(2))), 
+      // ✅ ASAL RATE
+      rate: Number((m.rate || 0).toFixed(2)),
+      amount: rnd(m.amount || rnd(m.rairi || 0) * Number((m.rate || 0).toFixed(2))), 
       trolleyEntryId: m.trolleyEntryId?.trim(), 
       batchId: m.batchId
     }));
@@ -246,7 +231,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const labourCost = rnd(newCount * mazdoorRate);
     const totalBill = labourCost + extraBills + mixCost;
 
-    // ✅ Pehle revert, phir apply - stock sahi rahega
     await revertTrolleyUsage(userId, old.mixMaterials || []);
 
     const updated = await BlockDaily.findOneAndUpdate(
@@ -259,7 +243,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         date: body.date ? new Date(body.date) : old.date, 
         bills: cleanBills, mixMaterials: cleanMix, 
         trolleyMixCost, mixCost, totalBill,
-        costPerBlock: newCount > 0 ? Math.round((totalBill / newCount) * 100) / 100 : 0,
+        costPerBlock: newCount > 0 ? Number((totalBill / newCount).toFixed(2)) : 0,
         isMonthlyElectricity: body.isMonthlyElectricity ?? old.isMonthlyElectricity ?? false,
         batchId: body.batchId || old.batchId,
       },

@@ -2,9 +2,8 @@
 import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { offlineDB } from "@/lib/offline-db";
-import type { OfflineBlockProduct, OfflineSale, OfflineCustomer } from "@/lib/offline-db";
-import BackupRestore from "../components/BackupRestore";
 import type { OfflineBlockDaily } from "@/lib/offline-db";
+import BackupRestore from "../components/BackupRestore";
 
 type Product = {
   _id: string;
@@ -98,10 +97,10 @@ useEffect(() => {
       const offlineNow = typeof window !== "undefined" && !window.navigator.onLine;
       if (offlineNow) {
         const [offlineProds, offlineSales, offlineCustomers, offlineDaily, pendingAll] = await Promise.all([
-          offlineDB.blockProducts.toArray() as Promise<OfflineBlockProduct[]>,
-          offlineDB.sales.orderBy("createdAt").reverse().toArray() as Promise<OfflineSale[]>,
-          offlineDB.customers.toArray() as Promise<OfflineCustomer[]>,
-          offlineDB.blockDaily.toArray() as Promise<OfflineBlockDaily[]>,
+          offlineDB.blockProducts.toArray(),
+          offlineDB.sales.orderBy("createdAt").reverse().toArray(),
+          offlineDB.customers.toArray(),
+          offlineDB.blockDaily.toArray(),
           offlineDB.sales.where("synced").equals(0).toArray(),
         ]);
 
@@ -127,7 +126,7 @@ useEffect(() => {
           totalQuantity: s.totalQuantity || s.quantity,
           paymentType: s.paymentType,
           createdAt: s.createdAt,
-          items: s.items as { productName: string; quantity: number }[],
+          items: s.items.map((it) => ({ productName: it.productName, quantity: it.quantity })),
         }));
         setRecentSales(mappedSales);
 
@@ -140,9 +139,9 @@ useEffect(() => {
         const prodAll = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
 
         offlineDaily.forEach((d: OfflineBlockDaily) => {
-          const blocks = Number((d as unknown as { blocksCount?: number }).blocksCount ?? 0);
-          const cement = Number(d.cementBags ?? 0);
-          const wages = Number(d.dailyWages ?? 0);
+          const blocks = Number(d.blocksCount || 0);
+          const cement = Number(d.cementBags || 0);
+          const wages = Number(d.dailyWages || 0);
           const date = new Date(d.date || d.createdAt);
           prodAll.totalBlocks += blocks; prodAll.totalCement += cement; prodAll.totalWages += wages; prodAll.count += 1;
           if (date >= startOfMonth) { prodMonth.totalBlocks += blocks; prodMonth.totalCement += cement; prodMonth.totalWages += wages; prodMonth.count += 1; }
@@ -178,9 +177,9 @@ useEffect(() => {
           fetch(`/api/sales/top?filter=${topFilter}`, { signal: ctrl.signal }),
           offlineDB.sales.where("synced").equals(0).toArray(),
         ]);
-        const prodJson = (await prodRes.json()) as ProductsApiResponse;
-        const reportJson = (await reportRes.json()) as ReportsApi;
-        const topJson = (await topRes.json()) as TopApiResponse;
+        const prodJson = await prodRes.json() as ProductsApiResponse;
+        const reportJson = await reportRes.json() as ReportsApi;
+        const topJson = await topRes.json() as TopApiResponse;
         const productList: Product[] = Array.isArray(prodJson) ? prodJson : prodJson.products || prodJson.blockProducts || [];
         setProducts(productList);
         setReports(reportJson);

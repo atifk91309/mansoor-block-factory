@@ -9,7 +9,7 @@ export interface IMixMaterial {
   label: string;
   qty: string;
   rairi: number;
-  rate: number; // Frozen per Rairi - Maneray 60 / Ghata 55
+  rate: number;
   amount: number;
   trolleyEntryId?: string;
   batchId?: string;
@@ -58,30 +58,19 @@ const MixMaterialSchema = new Schema<IMixMaterial>({
 
 const BlockDailySchema = new Schema<IBlockDaily>({
   date: { type: Date, required: true, default: Date.now, index: true },
-  
-  cementBags: { 
-    type: Number, 
-    required: false, 
-    min: 0, 
-    default: 0, 
-    set: (v: number): number => Math.round(v || 0) 
-  },
+  cementBags: { type: Number, required: false, min: 0, default: 0, set: (v: number): number => Math.round(v || 0) },
   cementRate: { type: Number, required: false, default: 1400, min: 0, set: (v: number) => Math.round(v || 0) },
   cementCost: { type: Number, default: 0, min: 0 },
-  
   blocksMade: { type: String, required: true, trim: true, index: true },
   blocksCount: { type: Number, required: true, min: 0, set: (v: number): number => Math.round(v || 0) },
-  
   mazdoorRatePerBlock: { type: Number, default: 3, min: 0 },
   ratePerBlock: { type: Number, default: 3, min: 0 },
   dailyWages: { type: Number, required: false, min: 0, default: 0 },
   labourCost: { type: Number, default: 0, min: 0 },
-  
   blockType: { type: String, default: "6 inch", index: true },
   userId: { type: Schema.Types.Mixed, required: true, index: true },
   bills: { type: [BillSchema], default: [] },
   mixMaterials: { type: [MixMaterialSchema], default: [] },
-  
   trolleyMixCost: { type: Number, default: 0, min: 0 },
   mixCost: { type: Number, default: 0, min: 0 },
   totalBill: { type: Number, default: 0, min: 0 },
@@ -89,10 +78,7 @@ const BlockDailySchema = new Schema<IBlockDaily>({
   isMonthlyElectricity: { type: Boolean, default: false },
   batchId: { type: String, required: false, trim: true },
   localId: { type: String, trim: true, index: true },
-}, { 
-  timestamps: true,
-  strict: false,
-});
+}, { timestamps: true, strict: false });
 
 BlockDailySchema.pre("validate", function () {
   const doc = this as IBlockDaily & {
@@ -104,83 +90,48 @@ BlockDailySchema.pre("validate", function () {
   if (doc.cementBori !== undefined && !doc.cementBags) {
     doc.cementBags = Math.round(Number(doc.cementBori) || 0);
   }
-  if (!doc.cementBags) {
-    doc.cementBags = 0;
-  }
-  if (!doc.date) {
-    doc.date = new Date();
-  }
+  if (!doc.cementBags) doc.cementBags = 0;
+  if (!doc.date) doc.date = new Date();
 
-  const isNewDoc = doc.isNew;
-  const isMixModified = doc.isModified("mixMaterials");
-  const isBagsModified = doc.isModified("cementBags") || doc.isModified("cementRate");
-  const isCountModified = doc.isModified("blocksCount") || doc.isModified("ratePerBlock") || doc.isModified("mazdoorRatePerBlock");
-  const isBillsModified = doc.isModified("bills");
+  // 1. Cement - hamesha
+  const rate = doc.cementRate || 1400;
+  doc.cementRate = Math.round(rate);
+  doc.cementCost = Math.round((doc.cementBags || 0) * rate);
 
-  // 1. Cement - sirf new ya bags change pe
-  if (isNewDoc || isBagsModified) {
-    const rate = doc.cementRate || 1400;
-    doc.cementRate = Math.round(rate);
-    doc.cementCost = Math.round((doc.cementBags || 0) * rate);
-  }
+  // 2. Mazdoor - hamesha
+  const mRate = doc.mazdoorRatePerBlock || doc.ratePerBlock || 3;
+  doc.mazdoorRatePerBlock = mRate;
+  doc.ratePerBlock = mRate;
+  doc.dailyWages = Math.round((doc.blocksCount || 0) * mRate);
+  doc.labourCost = doc.dailyWages;
 
-  // 2. Mazdoor - sirf new ya count change pe
-  if (isNewDoc || isCountModified) {
-    const mRate = doc.mazdoorRatePerBlock || doc.ratePerBlock || 3;
-    doc.mazdoorRatePerBlock = mRate;
-    doc.ratePerBlock = mRate;
-    doc.dailyWages = Math.round((doc.blocksCount || 0) * mRate);
-    doc.labourCost = doc.dailyWages;
-  }
-
-  // 3. Trolley mix - FROZEN - sirf new ya mix change pe
-  if (isNewDoc || isMixModified) {
-    doc.mixMaterials.forEach((m) => {
-      if ((!m.rairi || m.rairi === 0) && m.qty) {
-        const num = parseInt(m.qty.replace(/[^0-9]/g, "") || "0", 10);
-        m.rairi = Number.isNaN(num) ? 0 : num;
-      }
-      if (isNewDoc) {
-        if (m.rairi && m.rate) {
-          m.rate = Number(Number(m.rate).toFixed(2));
-          m.amount = Math.round(m.rairi * m.rate);
-        }
-      } else if (!m.amount && m.rairi && m.rate) {
-        m.amount = Math.round(m.rairi * m.rate);
-      }
-    });
-  }
-
-  // 4. Totals - sirf jab zaroori ho
-  if (isNewDoc || isMixModified || isBagsModified || isCountModified || isBillsModified) {
-    const extraBills = doc.bills.reduce((sum, b) => {
-      const l = b.label.toLowerCase();
-      if (l.includes("labour") || b.label.includes("مزدوری") || l.includes("mazdoor")) {
-        return sum;
-      }
-      if (doc.isMonthlyElectricity && (l.includes("electric") || b.label.includes("بجلی"))) {
-        return sum;
-      }
-      return sum + (b.amount || 0);
-    }, 0);
-
-    if (isNewDoc || isMixModified || isBagsModified) {
-      doc.trolleyMixCost = doc.mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
-      doc.mixCost = doc.trolleyMixCost + (doc.cementCost || 0);
+  // 3. Trolley mix - ✅ ASAL HISAB - har baar recalc
+  doc.mixMaterials.forEach((m) => {
+    if ((!m.rairi || m.rairi === 0) && m.qty) {
+      const num = parseInt(m.qty.replace(/[^0-9]/g, "") || "0", 10);
+      m.rairi = Number.isNaN(num) ? 0 : num;
     }
-    if (isNewDoc || isMixModified || isBagsModified || isCountModified || isBillsModified) {
-      doc.totalBill = (doc.labourCost || 0) + extraBills + (doc.mixCost || 0);
-      if (doc.blocksCount > 0) {
-        doc.costPerBlock = Math.round((doc.totalBill / doc.blocksCount) * 100) / 100;
-      } else {
-        doc.costPerBlock = 0;
-      }
+    // rate trolley stock se asal aayega (309.09), hamesha recalc
+    if (m.rairi && m.rate) {
+      m.rate = Number(Number(m.rate).toFixed(2));
+      m.amount = Math.round(m.rairi * m.rate);
     }
-  }
+  });
 
-  if (!doc.batchId && doc.localId) {
-    doc.batchId = doc.localId;
-  } 
+  // 4. Totals - hamesha
+  const extraBills = doc.bills.reduce((sum, b) => {
+    const l = b.label.toLowerCase();
+    if (l.includes("labour") || b.label.includes("مزدوری") || l.includes("mazdoor")) return sum;
+    if (doc.isMonthlyElectricity && (l.includes("electric") || b.label.includes("بجلی"))) return sum;
+    return sum + (b.amount || 0);
+  }, 0);
+
+  doc.trolleyMixCost = doc.mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
+  doc.mixCost = doc.trolleyMixCost + (doc.cementCost || 0);
+  doc.totalBill = (doc.labourCost || 0) + extraBills + (doc.mixCost || 0);
+  doc.costPerBlock = doc.blocksCount > 0 ? Number((doc.totalBill / doc.blocksCount).toFixed(2)) : 0;
+
+  if (!doc.batchId && doc.localId) doc.batchId = doc.localId;
 });
 
 BlockDailySchema.index({ userId: 1, date: -1 });

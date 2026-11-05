@@ -29,9 +29,7 @@ type BlockDailyBody = {
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
 
-type UserFilter = { userId: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }] };
-
-function getUserFilter(userId: string): UserFilter {
+function getUserFilter(userId: string) {
   if (Types.ObjectId.isValid(userId)) {
     return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
   }
@@ -48,36 +46,26 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
       exist.amount = rnd((exist.amount ?? 0) + (m.amount ?? 0));
       exist.qty = `${exist.rairi} ریڑھی`;
     } else {
-      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number(Number(m.rate || 0).toFixed(2)) });
+      map.set(norm, { ...m, qty: m.qty || `${m.rairi} ریڑھی`, rate: Number((m.rate || 0).toFixed(2)) });
     }
   }
   return Array.from(map.values());
 }
 
-interface TrolleyEntryLean {
-  material: string; 
-  normalizedMaterial: string;
-  rairiInTrolley?: number; 
-  rairiPerTrolley?: number;
-  actualRairi?: number;
-  totalUsed?: number; 
-  perRairiRate?: number;
-}
-
 async function recalcAllStocks(userId: string): Promise<void> {
   const all = await TrolleyEntryModel.find({ 
     ...getUserFilter(userId)
-  }).lean<TrolleyEntryLean[]>();
+  }).lean();
   
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of all) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? e.rairiPerTrolley ?? 0);
+    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? 0);
     const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
     if (rem <= 0) continue;
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
-    const rate = Number(Number(e.perRairiRate ?? 0).toFixed(2)); // ✅ fix
+    const rate = Number((e.perRairiRate || 0).toFixed(2));
     cur.rairi += rem;
     cur.cost += rem * rate;
     map.set(norm, cur);
@@ -105,7 +93,7 @@ async function recalcAllStocks(userId: string): Promise<void> {
     );
   }
 
-  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean() as unknown as { totalRairi: number; normalizedMaterial: string }[];
+  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean();
   const zeroNorms = allStocks.filter(s => (s.totalRairi || 0) <= 0).map(s => s.normalizedMaterial);
   if (zeroNorms.length > 0) {
     await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: zeroNorms } });
@@ -119,7 +107,7 @@ async function recalcAllStocks(userId: string): Promise<void> {
 
 export async function GET(req: NextRequest) {
   await connectDB();
-  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
+  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId") || session?.user?.id;
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
@@ -133,8 +121,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   await connectDB();
-  const body = (await req.json()) as BlockDailyBody;
-  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
+  const body = await req.json() as BlockDailyBody;
+  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
   const userId = body.userId || session?.user?.id;
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
   if (!body.blocksMade?.trim()) return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
@@ -160,6 +148,7 @@ export async function POST(req: NextRequest) {
     .filter((m) => m.label?.trim() && (m.rairi || 0) > 0)
     .map((m): MixBody => {
       const rairi = rnd(m.rairi || 0);
+      // ✅ ASAL RATE - client se jo 309.09 aaya usi se
       const ratePerRairi = Number((m.rate || 0).toFixed(2));
       return {
         label: m.label.trim(),
@@ -193,30 +182,45 @@ export async function POST(req: NextRequest) {
     blockType: body.blockType || "6 inch", userId, batchId,
     bills: cleanBills, mixMaterials: cleanMix, 
     trolleyMixCost, mixCost, totalBill,
-    costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
+    costPerBlock: count > 0 ? Number((totalBill / count).toFixed(2)) : 0,
     isMonthlyElectricity: body.isMonthlyElectricity || false, 
     localId: body.localId || `daily_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
   });
 
-  for (const mix of cleanMix) {
+    for (const mix of cleanMix) {
     if (mix.rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();
     let deducted = false;
 
     if (mix.trolleyEntryId) {
       const updated = await TrolleyEntryModel.findOneAndUpdate(
-        { ...getUserFilter(userId), localId: mix.trolleyEntryId, status: "OPEN" },
+        { 
+          ...getUserFilter(userId), 
+          localId: mix.trolleyEntryId,
+          // status hatao — CLOSED pe bhi deduct hona chahiye
+        },
         { $inc: { totalUsed: mix.rairi } }
       );
       if (updated) deducted = true;
     }
     
     if (!deducted) {
-      const oldestOpen = await TrolleyEntryModel.findOne({
-        ...getUserFilter(userId), normalizedMaterial: normalized, status: "OPEN",
-      }).sort({ date: 1 });
-      if (oldestOpen) {
-        await TrolleyEntryModel.updateOne({ _id: oldestOpen._id }, { $inc: { totalUsed: mix.rairi } });
+      // ✅ CLOSED + OPEN dono me se sab se purana jisme stock bacha ho
+      const allForMat = await TrolleyEntryModel.find({
+        ...getUserFilter(userId), 
+        normalizedMaterial: normalized,
+      }).sort({ date: 1 }).lean();
+      
+      let need = mix.rairi;
+      for (const ent of allForMat) {
+        if (need <= 0) break;
+        const eff = rnd(ent.actualRairi ?? ent.rairiInTrolley ?? 0);
+        const rem = Math.max(0, eff - rnd(ent.totalUsed ?? 0));
+        if (rem <= 0) continue;
+        const use = Math.min(rem, need);
+        await TrolleyEntryModel.updateOne({ _id: ent._id }, { $inc: { totalUsed: use } });
+        need -= use;
+        deducted = true;
       }
     }
   }

@@ -37,14 +37,7 @@ export interface ITrolleyStock extends Document {
   updatedAt: Date;
 }
 
-function getRairiForMaterial(name: string): number {
-  const n = name.toLowerCase().trim();
-  if (n.includes("منیرے") || n.includes("maneray") || n.includes("meneray")) return 60;
-  if (n.includes("ترکے") || n.includes("tarakay") || n.includes("tarkay")) return 60;
-  if (n.includes("پن") || n.includes("pin")) return 60;
-  if (n.includes("گھٹہ") || n.includes("ghata") || n.includes("شگہ") || n.includes("shaga")) return 55;
-  return 60; // Group 2 default 60
-}
+const FROZEN_RAIRI = 60;
 
 const TrolleyEntrySchema = new Schema<ITrolleyEntry>({
   date: { type: Date, default: Date.now, index: true },
@@ -55,9 +48,7 @@ const TrolleyEntrySchema = new Schema<ITrolleyEntry>({
     required: true, 
     min: 0, 
     set: (v: number) => Math.round(v || 0),
-    default: function(this: ITrolleyEntry) {
-      return getRairiForMaterial(this.material || "");
-    }
+    default: FROZEN_RAIRI
   },
   actualRairi: { type: Number, min: 0, set: (v: number) => Math.round(v || 0) },
   rairiRemaining: { type: Number, default: 0, min: 0 },
@@ -90,20 +81,25 @@ TrolleyStockSchema.index({ userId: 1, localId: 1 }, { unique: true });
 TrolleyEntrySchema.index({ userId: 1, status: 1 });
 TrolleyEntrySchema.index({ userId: 1, date: -1 });
 
-// ✅ Entry hook - frozen rate, no BlockDaily touch
+// ✅ ASAL HISAB HOOK
 TrolleyEntrySchema.pre("save", function(this: ITrolleyEntry) {
-  if (!this.rairiInTrolley || this.rairiInTrolley === 0) {
-    this.rairiInTrolley = getRairiForMaterial(this.material);
-  }
-  const effectiveRairi = this.actualRairi && this.status === "CLOSED" ? this.actualRairi : this.rairiInTrolley;
-  this.rairiRemaining = Math.max(0, effectiveRairi - (this.totalUsed || 0));
-  this.rairiLoss = this.actualRairi ? Math.max(0, this.rairiInTrolley - this.actualRairi) : 0;
+  const effectiveRairi = this.actualRairi && this.actualRairi > 0 ? this.actualRairi : (this.rairiInTrolley || FROZEN_RAIRI);
   
-  if (this.status === "CLOSED" && this.actualRairi && this.actualRairi > 0) {
-    this.perRairiRate = this.trolleyPrice / this.actualRairi;
-  } else if (this.rairiInTrolley > 0) {
-    this.perRairiRate = this.trolleyPrice / this.rairiInTrolley;
+  if (!this.rairiInTrolley || this.rairiInTrolley <= 0) {
+    this.rairiInTrolley = effectiveRairi;
   }
+
+  // remaining = asal - used
+  this.rairiRemaining = Math.max(0, effectiveRairi - (this.totalUsed || 0));
+  this.rairiLoss = this.actualRairi ? Math.max(0, FROZEN_RAIRI - this.actualRairi) : 0;
+  
+  // ✅ RATE ASAL RAIRI SE - agar perRairiRate pehle se set hai to usko rehne do, warna asal se nikalo
+  if (this.trolleyPrice > 0) {
+    if (!this.perRairiRate || this.isModified("actualRairi") || this.isModified("trolleyPrice") || this.isModified("rairiInTrolley")) {
+       this.perRairiRate = Number((this.trolleyPrice / effectiveRairi).toFixed(2));
+    }
+  }
+
   if (this.status === "CLOSED" && !this.closedAt) {
     this.closedAt = new Date();
   }
@@ -112,14 +108,15 @@ TrolleyEntrySchema.pre("save", function(this: ITrolleyEntry) {
   }
 });
 
-// ✅ NEW: Stock hook - avgRate auto + zero protection
 TrolleyStockSchema.pre("save", function(this: ITrolleyStock) {
-  if (this.totalRairi > 0 && this.totalCost > 0) {
-    this.avgRate = this.totalCost / this.totalRairi;
-  } else if (this.totalRairi <= 0) {
-    // 0 rairi pe avg 0, API isko delete karega
+  if (this.totalRairi <= 0) {
     this.avgRate = 0;
     this.totalCost = 0;
+  } else {
+    // avgRate ko API ka bheja hua rehne do, yahan force nahi karna
+    if (this.totalCost > 0 && this.totalRairi > 0 && !this.avgRate) {
+      this.avgRate = Number((this.totalCost / this.totalRairi).toFixed(2));
+    }
   }
   if (!this.normalizedMaterial) {
     this.normalizedMaterial = this.material.toLowerCase().trim();

@@ -8,6 +8,7 @@ import type {
 } from "./offline-db";
 
 const API_TROLLEY = "/api/trolley-stock";
+const FROZEN_RAIRI = 60;
 
 export interface SaleInput {
   productId?: string;
@@ -62,9 +63,10 @@ export interface MonthlyExpenseInput {
 
 export interface TrolleyInput {
   material: string; 
-  quantity?: number; // trolley count - backward compat
-  rairiPerTrolley?: number; // 60/55 Group 2
-  rairiInTrolley?: number; // API compat
+  quantity?: number;
+  rairiPerTrolley?: number;
+  rairiInTrolley?: number;
+  actualRairi?: number;
   unit?: StockUnit;
   trolleyPrice: number;
   purpose?: TrolleyPurpose; 
@@ -76,8 +78,8 @@ export interface TrolleyInput {
 
 export interface TrolleyCloseInput { 
   localId: string; 
-  actualQty: number; // rairi count
-  actualRairi?: number; // new field
+  actualQty: number;
+  actualRairi?: number;
   userId: string; 
 }
 
@@ -90,11 +92,6 @@ function rnd(n: number): number { return Math.round(n || 0); }
 function isElectricLabel(label: string): boolean {
   const l = label.toLowerCase();
   return l.includes("electric") || l.includes("bijli") || l.includes("بجلی") || l.includes("wapda");
-}
-function getRairiForMaterial(name: string): number {
-  const low = name.toLowerCase();
-  if (low.includes("ghata") || low.includes("shaga") || low.includes("گھٹہ") || low.includes("شگہ")) return 55;
-  return 60; // Group 2 default
 }
 type SyncableRegistration = ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } };
 
@@ -200,13 +197,12 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     .filter((b) => b.label && b.label.trim().length > 0)
     .map((b) => ({ label: b.label.trim(), amount: rnd(b.amount || 0) }));
 
-  // ✅ FROZEN: rairi * rate = amount, no re-calc later
   const cleanMix: MixMaterialEntry[] = (data.mixMaterials || [])
     .filter((m) => m.label && m.label.trim().length > 0 && (m.rairi || m.quantity) > 0)
     .map((m) => {
       const rairi = rnd(m.rairi || 0);
       const quantity = rnd(m.quantity || rairi);
-      const ratePer = Number((m.rate || 0).toFixed(2)); // frozen 216.67 etc
+      const ratePer = Number((m.rate || 0).toFixed(2));
       const unit = m.unit || "trolley";
       return { 
         label: m.label.trim(), 
@@ -215,7 +211,7 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
         quantity, 
         unit, 
         rate: ratePer, 
-        amount: rnd(m.amount || rairi * ratePer), // frozen amount
+        amount: rnd(m.amount || rairi * ratePer),
         trolleyEntryId: m.trolleyEntryId?.trim() || "", 
         batchId: m.batchId || batchId 
       };
@@ -237,7 +233,7 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
     mazdoorRatePerBlock: mazdoorRate, ratePerBlock: mazdoorRate, labourCost: wages,
     blockType: data.blockType || "6 inch", userId: data.userId, batchId, synced: 0, createdAt: nowISO,
     bills: cleanBills, mixMaterials: cleanMix, trolleyMixCost, mixCost, totalBill,
-    costPerBlock: count > 0 ? Math.round((totalBill / count) * 100) / 100 : 0,
+    costPerBlock: count > 0 ? Number((totalBill / count).toFixed(2)) : 0,
     isMonthlyElectricity: data.isMonthlyElectricity || false,
   };
 
@@ -252,7 +248,6 @@ export async function saveBlockDailyOffline(data: BlockDailyInput): Promise<stri
 export async function deleteBlockDailyOffline(localId: string): Promise<void> {
   const daily = await offlineDB.blockDaily.get(localId); 
   if (!daily) return;
-  
   await offlineDB.transaction("rw", offlineDB.blockDaily, offlineDB.syncQueue, async () => {
     await offlineDB.blockDaily.delete(localId);
     await offlineDB.syncQueue.where("localId").equals(localId).delete();
@@ -280,27 +275,28 @@ export async function saveMonthlyExpenseOffline(data: MonthlyExpenseInput): Prom
 
 export async function saveTrolleyOffline(data: TrolleyInput): Promise<string> {
   const localId = data.localId || genLocalId("trolley"); 
-  const quantity = rnd(data.quantity || 1); // 1 trolley
+  const quantity = rnd(data.quantity || 1);
   const price = rnd(data.trolleyPrice); 
   const normalized = data.material.toLowerCase().trim(); 
   const batchId = data.batchId;
   const purpose = data.purpose || "factory"; 
   const nowISO = new Date().toISOString();
   const unit = data.unit || "trolley";
-  const rairiPer = rnd(data.rairiPerTrolley || data.rairiInTrolley || getRairiForMaterial(data.material));
-  const totalRairi = rnd(quantity * rairiPer);
-  const perRairi = rairiPer > 0 ? Number((price / rairiPer).toFixed(2)) : 0;
+  const actualRairi = rnd(data.actualRairi || data.rairiInTrolley || data.rairiPerTrolley || FROZEN_RAIRI);
+  const rairiPer = actualRairi;
+  const totalRairi = actualRairi * quantity;
+  // ✅ ASAL RATE
+  const perRairi = Number((price / actualRairi).toFixed(2));
 
   const entry: OfflineTrolleyEntry = {
     localId, date: data.date || nowISO, material: data.material.trim(), normalizedMaterial: normalized,
-    quantity, rairiPerTrolley: rairiPer, totalRairi, unit, trolleyPrice: price, perRairiRate: perRairi, status: "OPEN", purpose, batchId, userId: data.userId, synced: 0, createdAt: nowISO,
+    quantity, rairiPerTrolley: rairiPer, totalRairi, actualRairi, unit, trolleyPrice: price, perRairiRate: perRairi, status: "OPEN", purpose, batchId, userId: data.userId, synced: 0, createdAt: nowISO,
   };
 
   await offlineDB.transaction("rw", offlineDB.trolleyEntries, offlineDB.trolleyStock, offlineDB.syncQueue, async () => {
     await offlineDB.trolleyEntries.put(entry);
     const existing = await offlineDB.trolleyStock.where("normalizedMaterial").equals(normalized).first();
     if (existing) {
-      // ✅ Zero wale ko update nahi, agar zero hai to fresh banao
       if ((existing.totalRairi || 0) <= 0) {
         await offlineDB.trolleyStock.delete(existing.localId);
         const stock: OfflineTrolleyStock = {
@@ -328,12 +324,6 @@ export async function saveTrolleyOffline(data: TrolleyInput): Promise<string> {
       };
       await offlineDB.trolleyStock.put(stock);
     }
-    // 0 wale clean
-    const allStocks = await offlineDB.trolleyStock.toArray().catch(() => [] as OfflineTrolleyStock[]);
-    const zeroIds = allStocks.filter(s => s.localId !== entry.localId && ((s.totalRairi || 0) <= 0 || (s.remainingRairi || 0) <= 0)).map(s => s.localId);
-    if (zeroIds.length > 0) {
-      await offlineDB.trolleyStock.bulkDelete(zeroIds);
-    }
     await offlineDB.syncQueue.put({ type: "trolleyEntry", localId, payload: entry, createdAt: new Date(), attempts: 0 });
   });
   return localId;
@@ -343,17 +333,20 @@ export async function closeTrolleyOffline(data: TrolleyCloseInput): Promise<void
   const entry = await offlineDB.trolleyEntries.get(data.localId) || await offlineDB.trolleyEntries.where("localId").equals(data.localId).first();
   if (!entry) return; 
   const actualRairi = rnd(data.actualRairi || data.actualQty);
-  const actualQty = rnd(Math.ceil(actualRairi / (entry.rairiPerTrolley || getRairiForMaterial(entry.material))));
+  const actualQty = rnd(Math.ceil(actualRairi / (entry.rairiPerTrolley || FROZEN_RAIRI)));
+  const realRate = Number((entry.trolleyPrice / actualRairi).toFixed(2));
   
   await offlineDB.transaction("rw", offlineDB.trolleyEntries, offlineDB.trolleyStock, offlineDB.syncQueue, async () => {
     await offlineDB.trolleyEntries.update(entry.localId, {
       quantity: actualQty, 
       totalRairi: actualRairi,
-      perRairiRate: actualRairi > 0 ? Number((entry.trolleyPrice / actualRairi).toFixed(2)) : entry.perRairiRate,
+      actualRairi: actualRairi,
+      rairiPerTrolley: actualRairi,
+      // ✅ ASAL RATE
+      perRairiRate: realRate,
       status: "CLOSED", 
       synced: 0,
     });
-    // stock update not here - server will handle via API, offline keeps frozen
     const closePayload: TrolleyClosePayload = { localId: data.localId, actualQty: actualQty, actualRairi: actualRairi, userId: data.userId };
     await offlineDB.syncQueue.put({ 
       type: "trolleyClose", 
@@ -446,18 +439,20 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
   const trolleyEntries = await offlineDB.trolleyEntries.where("synced").equals(0).toArray().catch((): OfflineTrolleyEntry[] => []);
   for (const t of trolleyEntries) {
     try {
+      const actualR = t.actualRairi || t.totalRairi || FROZEN_RAIRI;
+      const realRate = Number((t.trolleyPrice / actualR).toFixed(2));
       const res = await fetch(API_TROLLEY, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           material: t.material, 
           quantity: t.quantity, 
-          rairiPerTrolley: t.rairiPerTrolley, 
-          rairiInTrolley: t.rairiPerTrolley, // API compat
+          rairiPerTrolley: actualR, 
+          rairiInTrolley: actualR,
           totalRairi: t.totalRairi,
-          actualRairi: t.totalRairi,
+          actualRairi: actualR,
           unit: t.unit, 
           trolleyPrice: t.trolleyPrice, 
-          perRairiRate: t.perRairiRate,
+          perRairiRate: realRate,
           purpose: t.purpose, 
           date: t.date, 
           localId: t.localId, 
@@ -467,7 +462,6 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
       if (res.ok) { await offlineDB.trolleyEntries.update(t.localId, { synced: 1 }); await offlineDB.syncQueue.where("localId").equals(t.localId).delete(); trolleySynced++; }
     } catch {}
   }
-  // trolley close queue
   const closeQueue = await offlineDB.syncQueue.where("type").equals("trolleyClose").toArray().catch((): SyncQueueItem[] => []);
   for (const q of closeQueue) {
     try {

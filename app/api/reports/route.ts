@@ -75,8 +75,8 @@ function fmtDaily(arr: DailyAgg[]): DailyAgg {
     totalCement: Math.round(r.totalCement || 0),
     totalWages: Math.round(r.totalWages || 0),
     count: r.count || 0,
-    totalMix: Math.round((r as unknown as { totalMix: number }).totalMix || 0),
-    totalBill: Math.round((r as unknown as { totalBill: number }).totalBill || 0),
+    totalMix: Math.round(r.totalMix || 0),
+    totalBill: Math.round(r.totalBill || 0),
   };
 }
 
@@ -97,7 +97,7 @@ function getPKTRange() {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) {
       return NextResponse.json({
         today: emptySale(), month: emptySale(), year: emptySale(), all: emptySale(),
@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
 
     const saleAgg = (match: SaleMatch) =>
       Sale.aggregate<SaleAgg>([
-        { $match: match as unknown as Record<string, unknown> },
+        { $match: match },
         {
           $group: {
             _id: null,

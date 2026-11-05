@@ -17,8 +17,8 @@ export type BillEntry = { label: string; amount: number };
 export type MixMaterialEntry = { 
   label: string; 
   qty: string;
-  rairi: number; // Group 2 - 60 Maneray/Tarkay/Pin, 55 Ghata
-  rate: number; // frozen per rairi
+  rairi: number;
+  rate: number; // asal rate - price / asal rairi
   amount: number;
   quantity: number;
   unit: StockUnit;
@@ -35,6 +35,7 @@ export interface OfflineTrolleyEntry {
   quantity: number;
   rairiPerTrolley: number;
   totalRairi: number;
+  actualRairi?: number;
   unit: StockUnit;
   trolleyPrice: number;
   perRairiRate: number;
@@ -217,11 +218,7 @@ export interface SyncQueueItem {
 
 function rnd(n: number): number { return Math.round(n || 0); }
 
-function getRairiForMaterial(name: string): number {
-  const low = name.toLowerCase();
-  if (low.includes("ghata") || low.includes("shaga") || low.includes("گھٹہ") || low.includes("شگہ")) return 55;
-  return 60; // Group 2 default
-}
+const FROZEN_RAIRI = 60;
 
 type LegacyStock = OfflineTrolleyStock & { totalRairi?: number; rairiPerUnit?: number; totalQty?: number };
 type LegacyProduct = OfflineBlockProduct & { rairiPerTrolley?: number; buyPricePerRairi?: number; totalRairi?: number };
@@ -262,33 +259,16 @@ export class OfflineDB extends Dexie {
       const tStock = tx.table("trolleyStock");
       await tStock.toCollection().modify((raw: unknown) => {
         const s = raw as LegacyStock;
-        if (!s.rairiPerTrolley) s.rairiPerTrolley = getRairiForMaterial(s.material || "");
         const qty = s.totalQty || 0;
         if (!s.totalRairi || s.totalRairi === 0) {
-          s.totalRairi = Math.round(qty * s.rairiPerTrolley);
+          s.totalRairi = Math.round(qty * (s.rairiPerTrolley || FROZEN_RAIRI));
         }
         s.usedRairi = s.usedRairi || 0;
         s.remainingRairi = Math.max(0, (s.totalRairi || 0) - (s.usedRairi || 0));
-        if (s.avgRate && !s.perRairiRate) {
-          s.perRairiRate = Number((s.avgRate / s.rairiPerTrolley).toFixed(2));
-        }
         s.unit = s.unit || "trolley";
-      });
-
-      const products = tx.table("blockProducts");
-      await products.toCollection().modify((raw: unknown) => {
-        const p = raw as LegacyProduct;
-        const delKeys = ["rairiPerTrolley", "buyPricePerRairi", "totalRairi"] as const;
-        for (const k of delKeys) {
-          delete (p as unknown as Record<string, unknown>)[k];
-        }
-        if (p.unit === "other" as unknown as StockUnit) {
-          p.unit = "trolley";
-        }
       });
     });
 
-    // ✅ V23 - 0 rairi auto-remove + frozen mix protection
     this.version(23).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
@@ -299,29 +279,51 @@ export class OfflineDB extends Dexie {
       trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
       trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
     }).upgrade(async (tx) => {
-      // 0 rairi wale stock delete - tumhara last bug
       const tStock = tx.table("trolleyStock");
       const all = await tStock.toArray() as OfflineTrolleyStock[];
       const zeroIds = all.filter(s => (s.totalRairi || 0) <= 0 || (s.remainingRairi || 0) <= 0).map(s => s.localId);
-      if (zeroIds.length > 0) {
-        await tStock.bulkDelete(zeroIds);
-      }
-      // BlockDaily mix frozen - amount already exists to re-calc mat karo
-      const bDaily = tx.table("blockDaily");
-      await bDaily.toCollection().modify((raw: unknown) => {
-        const b = raw as OfflineBlockDaily;
-        if (b.mixMaterials && b.mixMaterials.length > 0) {
-          b.mixMaterials.forEach(m => {
-            // frozen: amount agar hai to wahi rehne do, rate ko touch nahi
-            if (m.amount && m.amount > 0) {
-              return;
-            }
-            if (m.rairi && m.rate) {
-              m.amount = Math.round(m.rairi * m.rate);
-            }
-          });
+      if (zeroIds.length > 0) await tStock.bulkDelete(zeroIds);
+    });
+
+    // ✅ V24 - ASAL HISAB - actual rairi se rate
+    this.version(24).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt",
+      sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
+    }).upgrade(async (tx) => {
+      const tEntries = tx.table("trolleyEntries");
+      await tEntries.toCollection().modify((raw: unknown) => {
+        const e = raw as OfflineTrolleyEntry;
+        const effRairi = e.actualRairi || e.rairiPerTrolley || e.totalRairi || FROZEN_RAIRI;
+        if (e.trolleyPrice > 0 && effRairi > 0) {
+          e.perRairiRate = Number((e.trolleyPrice / effRairi).toFixed(2));
+        }
+        e.rairiPerTrolley = rnd(effRairi);
+      });
+      const tStock = tx.table("trolleyStock");
+      await tStock.toCollection().modify((raw: unknown) => {
+        const s = raw as OfflineTrolleyStock;
+        if (s.totalCost > 0 && s.totalRairi > 0) {
+          s.perRairiRate = Number((s.totalCost / s.totalRairi).toFixed(2));
+          s.avgRate = s.perRairiRate;
         }
       });
+    });
+
+    this.version(25).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt",
+      sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
     });
   }
 }
@@ -336,14 +338,12 @@ export function calcTotal(sellPrice: number, qty: number): number {
   return rnd(rnd(sellPrice) * rnd(qty));
 }
 
-// ✅ FIX: frozen rate preserve
 export function mergeMixMaterialsOffline(mixes: MixMaterialEntry[]): MixMaterialEntry[] {
   const map = new Map<string, MixMaterialEntry>();
   for (const m of mixes) {
     const norm = m.label.toLowerCase().trim();
     const exist = map.get(norm);
     if (exist) {
-      // frozen: rate purana hi rakho, naya rate se overwrite nahi
       exist.rairi = rnd(exist.rairi + m.rairi);
       exist.quantity = rnd(exist.quantity + m.quantity);
       exist.amount = rnd(exist.amount + m.amount);
@@ -355,21 +355,41 @@ export function mergeMixMaterialsOffline(mixes: MixMaterialEntry[]): MixMaterial
   return Array.from(map.values());
 }
 
-export async function deductTrolleyOffline(_mixes: MixMaterialEntry[]): Promise<void> {
-  console.log("Deduct disabled - trolley, blockDaily, products are separate modules now - frozen logic");
+export async function deductTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
+  for (const m of mixes) {
+    const norm = m.label.toLowerCase().trim();
+    const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
+    if (!stock) continue;
+    const newUsed = rnd((stock.usedRairi || 0) + (m.rairi || 0));
+    const newRemaining = Math.max(0, (stock.totalRairi || 0) - newUsed);
+    await offlineDB.trolleyStock.update(stock.localId, {
+      usedRairi: newUsed,
+      remainingRairi: newRemaining,
+    });
+    if (newRemaining <= 0) {
+      await offlineDB.trolleyStock.delete(stock.localId);
+    }
+  }
 }
 
-export async function revertTrolleyOffline(_mixes: MixMaterialEntry[]): Promise<void> {
-  console.log("Revert disabled - modules are separate now - frozen logic");
+export async function revertTrolleyOffline(mixes: MixMaterialEntry[]): Promise<void> {
+  for (const m of mixes) {
+    const norm = m.label.toLowerCase().trim();
+    const stock = await offlineDB.trolleyStock.where("normalizedMaterial").equals(norm).first();
+    if (!stock) continue;
+    const newUsed = Math.max(0, rnd((stock.usedRairi || 0) - (m.rairi || 0)));
+    const newRemaining = Math.max(0, (stock.totalRairi || 0) - newUsed);
+    await offlineDB.trolleyStock.update(stock.localId, {
+      usedRairi: newUsed,
+      remainingRairi: newRemaining,
+    });
+  }
 }
 
-// ✅ NEW: helper - 0 wale clean (trolley-stock page se call kar sakte ho)
 export async function cleanupZeroTrolleyStock(): Promise<number> {
   const all = await offlineDB.trolleyStock.toArray().catch(() => [] as OfflineTrolleyStock[]);
   const zeroIds = all.filter(s => (s.totalRairi || 0) <= 0 || (s.remainingRairi || 0) <= 0).map(s => s.localId);
-  if (zeroIds.length > 0) {
-    await offlineDB.trolleyStock.bulkDelete(zeroIds);
-  }
+  if (zeroIds.length > 0) await offlineDB.trolleyStock.bulkDelete(zeroIds);
   return zeroIds.length;
 }
 

@@ -27,14 +27,6 @@ function getUserFilter(userId: string): UserFilter {
   return { userId: userId };
 }
 
-function getRairiForMaterial(name: string): number {
-  const nm = name.toLowerCase().trim();
-  if (nm.includes("گھٹہ") || nm.includes("شگہ") || nm.includes("ghata") || nm.includes("shaga")) {
-    return 55;
-  }
-  return 60;
-}
-
 export async function GET(req: NextRequest) {
   await connectDB();
   const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
@@ -48,8 +40,7 @@ export async function GET(req: NextRequest) {
     entryFilter.status = statusParam;
   }
 
-  // 0 wale clean - direct filter for delete (no $or issue for delete)
-  const allStocks = await TrolleyStockModel.find({ ...base }).lean() as unknown as { normalizedMaterial: string; totalRairi: number }[];
+  const allStocks = await TrolleyStockModel.find({ ...base }).lean();
   const zeroNorms = allStocks.filter(s => (s.totalRairi || 0) <= 0).map(s => s.normalizedMaterial);
   if (zeroNorms.length > 0) {
     await TrolleyStockModel.deleteMany({ ...base, normalizedMaterial: { $in: zeroNorms } });
@@ -85,34 +76,34 @@ export async function POST(req: NextRequest) {
 
   if (!body.material?.trim()) return NextResponse.json({ error: "material required" }, { status: 400 });
 
-  const rairiInput = rnd(
-    body.rairiInTrolley || 
-    body.rairiPerTrolley || 
-    body.totalRairi || 
-    (body.quantity ? body.quantity * getRairiForMaterial(body.material) : 0) ||
-    getRairiForMaterial(body.material)
-  );
-  const actualRairi = body.actualRairi !== undefined ? rnd(body.actualRairi) : rairiInput;
+  const FROZEN_RAIRI = 60;
+  const qty = body.quantity ?? 0;
+  const totalR = body.totalRairi ?? 0;
+  // Creation pe hamesha 60 hi OPEN me
+  const initialRairi = rnd(totalR || (qty ? qty * FROZEN_RAIRI : 0) || FROZEN_RAIRI);
+
   const price = rnd(body.trolleyPrice);
-  if (rairiInput <= 0 || price <= 0) return NextResponse.json({ error: "rairi and price > 0" }, { status: 400 });
+  if (price <= 0 || initialRairi <= 0) return NextResponse.json({ error: "rairi and price > 0" }, { status: 400 });
 
   const purpose = body.purpose || "factory";
   const material = body.material.trim();
   const normalized = material.toLowerCase().trim();
-  const rate = body.perRairiRate ? Number(Number(body.perRairiRate).toFixed(2)) : Number((price / rairiInput).toFixed(2));
+  
+  // ✅ Creation pe frozen rate dikhao, asal rate close pe banega
+  const initialRate = Number((price / FROZEN_RAIRI).toFixed(2));
+
   const localId = body.localId || `trolley_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const rairiLoss = Math.max(0, rairiInput - actualRairi);
 
   const entry = await TrolleyEntryModel.create({
     date: body.date ? new Date(body.date) : new Date(),
     material,
     normalizedMaterial: normalized,
-    rairiInTrolley: rairiInput,
-    actualRairi: actualRairi,
-    rairiRemaining: actualRairi,
-    rairiLoss,
+    rairiInTrolley: initialRairi, // 60
+    // actualRairi abhi null rakho, close pe aayega
+    rairiRemaining: initialRairi,
+    rairiLoss: 0,
     trolleyPrice: price,
-    perRairiRate: rate,
+    perRairiRate: initialRate, // frozen
     status: "OPEN" as TrolleyStatus,
     purpose,
     totalUsed: 0,
@@ -120,9 +111,8 @@ export async function POST(req: NextRequest) {
     localId,
   });
 
-  // ✅ FIX: Write me $or nahi - direct userId se upsert, warna Documents 0 rehta hai
   const existingStock = await TrolleyStockModel.findOne({
-    userId: userId,
+    ...getUserFilter(userId),
     normalizedMaterial: normalized,
   });
 
@@ -132,28 +122,28 @@ export async function POST(req: NextRequest) {
       await TrolleyStockModel.create({
         material,
         normalizedMaterial: normalized,
-        totalRairi: actualRairi,
+        totalRairi: initialRairi,
         totalCost: price,
-        avgRate: rate,
-        userId,
+        avgRate: initialRate,
+        userId: existingStock.userId, // same type rakho
         localId: `stock_${normalized}_${Date.now()}`,
       });
     } else {
-      const newTotalRairi = rnd(existingStock.totalRairi + actualRairi);
+      const newTotalRairi = rnd(existingStock.totalRairi + initialRairi);
       const newTotalCost = rnd(existingStock.totalCost + price);
-      const newAvg = newTotalRairi > 0 ? Number((newTotalCost / newTotalRairi).toFixed(2)) : rate;
+      const weightedAvg = Number(((existingStock.avgRate * existingStock.totalRairi + initialRate * initialRairi) / newTotalRairi).toFixed(2));
       await TrolleyStockModel.updateOne(
         { _id: existingStock._id },
-        { $set: { totalRairi: newTotalRairi, totalCost: newTotalCost, avgRate: newAvg, material, updatedAt: new Date() } }
+        { $set: { totalRairi: newTotalRairi, totalCost: newTotalCost, avgRate: weightedAvg, material, updatedAt: new Date() } }
       );
     }
   } else {
     await TrolleyStockModel.create({
       material,
       normalizedMaterial: normalized,
-      totalRairi: actualRairi,
+      totalRairi: initialRairi,
       totalCost: price,
-      avgRate: rate,
+      avgRate: initialRate,
       userId,
       localId: `stock_${normalized}_${Date.now()}`,
     });

@@ -9,7 +9,6 @@ import * as XLSX from "xlsx";
 const API_TROLLEY = "/api/trolley-stock";
 
 type BlockTypeOption = "4 inch" | "5 inch" | "6 inch";
-type OfflineUser = { _id?: string; id?: string } | null;
 type FormState = { 
   date: string; 
   cementBags: number; 
@@ -26,9 +25,6 @@ type BlockDailyDoc = {
   bills?: BillEntry[]; mixMaterials?: MixMaterialEntry[]; totalBill?: number; mixCost?: number; 
   costPerBlock?: number; isMonthlyElectricity?: boolean;
 };
-type ApiResponse = { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[]; };
-type SessionResponse = { user?: { id?: string; _id?: string } };
-type TrolleyStockApi = { stock?: OfflineTrolleyStock[] };
 type OfflineDailyWithRate = OfflineBlockDaily & { cementRate?: number; cementCost?: number };
 
 const DEFAULT_BLOCKS = ["شگہ بلاک", "فل کرش بلاک", "مکس کرش بلاک", "ون کھتہ", "3 نمبر کھتہ", "کنکر کھتہ"];
@@ -92,12 +88,12 @@ export default function BlockDailyPage() {
     try { 
       const res = await fetch("/api/auth/session", { cache: "no-store" }); 
       if (res.ok) { 
-        const data = (await res.json()) as SessionResponse; 
+        const data = await res.json() as { user?: { id?: string; _id?: string } };
         if (data?.user?.id) return data.user.id; 
         if (data?.user?._id) return data.user._id; 
       } 
     } catch {}
-    const offlineUser = getOfflineUser() as OfflineUser; 
+    const offlineUser = getOfflineUser() as { _id?: string; id?: string } | null;
     return offlineUser?._id || offlineUser?.id || "offline_user";
   }
 
@@ -105,9 +101,10 @@ export default function BlockDailyPage() {
     const offline = await offlineDB.blockDaily.toArray().catch((): OfflineDailyWithRate[] => []);
     setHistory(offline.sort((a,b)=> b.date.localeCompare(a.date)));
     try {
-      const res = await fetch(`/api/block-daily`, { cache: "no-store" });
+      const userId = await getUserId();
+      const res = await fetch(`/api/block-daily?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
       if (res.ok) {
-        const j = (await res.json()) as ApiResponse;
+        const j = await res.json() as { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[] };
         const data = j.data ?? j.blockDailies ?? [];
         if (data.length > 0) {
           const mapped: OfflineDailyWithRate[] = data.map((d) => ({
@@ -160,9 +157,13 @@ export default function BlockDailyPage() {
           const userId = await getUserId();
           const res = await fetch(`${API_TROLLEY}?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
           if (res.ok) {
-            const j = (await res.json()) as TrolleyStockApi;
-            if (j.stock && j.stock.length > 0) {
-              setTrolleyStocks(j.stock.filter(s => (s.totalRairi || 0) > 0));
+            const j = await res.json() as { stock?: OfflineTrolleyStock[]; data?: OfflineTrolleyStock[] };
+            const list = j.stock ?? j.data ?? [];
+            if (list.length > 0) {
+              setTrolleyStocks(list.filter(s => (s.totalRairi || 0) > 0));
+              for (const s of list) {
+                await offlineDB.trolleyStock.put(s).catch(()=>{});
+              }
             }
           }
         } catch {}
@@ -197,21 +198,23 @@ export default function BlockDailyPage() {
       alert("0 ریڑھی والا اسٹاک ختم ہو گیا - دوبارہ لوڈ کریں");
       return;
     }
-    const rate = newMixRate > 0 ? Number(Number(newMixRate).toFixed(2)) : stock ? Number(Number(stock.avgRate).toFixed(2)) : 0;
+    const rate = newMixRate > 0 ? Number(newMixRate.toFixed(2)) : stock ? Number((stock.perRairiRate || stock.avgRate || 0).toFixed(2)) : 0;
     if (rate <= 0) {
       alert("ریٹ ضروری ہے - اسٹاک یا ریٹ لکھیں");
       return;
     }
     const amount = rnd(newMixRairi * rate);
-    const entry = { 
+    const entry: MixMaterialEntry = { 
       label: newMixLabel.trim(), 
       qty: `${newMixRairi} ریڑھی`, 
       rairi: rnd(newMixRairi), 
       rate: rate, 
-      amount, 
+      amount,
+      quantity: rnd(newMixRairi),
+      unit: "trolley",
       trolleyEntryId: stock?.localId || "",
       batchId: "",
-    } as unknown as MixMaterialEntry;
+    };
     setMixMaterials([...mixMaterials, entry]); 
     setNewMixLabel(""); setNewMixRairi(0); setNewMixRate(0); 
   };
@@ -224,6 +227,7 @@ export default function BlockDailyPage() {
     if (field === "rairi") { 
       item.rairi = rnd(Number(val)||0); 
       item.qty = `${item.rairi} ریڑھی`; 
+      item.quantity = item.rairi;
       item.amount = rnd(item.rairi * Number(item.rate || 0)); 
     }
     if (field === "rate") { 
@@ -252,7 +256,7 @@ export default function BlockDailyPage() {
         isMonthlyElectricity: form.isMonthlyElectricity, 
         dailyWages: wages, 
         bills: bills.filter(b => b.label.trim()), 
-        mixMaterials: mixMaterials.map(m => ({ ...m, rate: Number(Number(m.rate).toFixed(2)), amount: rnd(m.rairi * Number(Number(m.rate).toFixed(2))) })), 
+        mixMaterials: mixMaterials.map(m => ({ ...m, rate: Number(m.rate.toFixed(2)), amount: rnd(m.rairi * Number(m.rate.toFixed(2))) })), 
         totalBill, mixCost, labourCost: wages, petrolCost,
         costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0,
         userId 
@@ -279,6 +283,27 @@ export default function BlockDailyPage() {
           } catch {} 
         }
       }
+
+      for (const m of mixMaterials) {
+        const norm = m.label.toLowerCase().trim();
+        const st = await offlineDB.trolleyStock.where('normalizedMaterial').equals(norm).first().catch((): undefined => undefined);
+        if (st) {
+          const newRairi = Math.max(0, (st.totalRairi || 0) - m.rairi);
+          if (newRairi <= 0) {
+            await offlineDB.trolleyStock.delete(st.localId);
+          } else {
+            const newCost = Math.max(0, (st.totalCost || 0) - m.amount);
+            const newAvg = newRairi > 0 ? Number((newCost / newRairi).toFixed(2)) : st.avgRate;
+            await offlineDB.trolleyStock.update(st.localId, { 
+              totalRairi: newRairi, 
+              totalCost: newCost,
+              avgRate: newAvg,
+              perRairiRate: newAvg
+            });
+          }
+        }
+      }
+
       await loadHistory(); 
       const allStocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []);
       setTrolleyStocks(allStocks.filter(s => (s.totalRairi||0)>0));
@@ -322,7 +347,7 @@ export default function BlockDailyPage() {
     const rows = history.filter((h) => !filter || h.blocksMade.toLowerCase().includes(filter.toLowerCase()));
     if (rows.length === 0) { alert("کوئی ڈیٹا نہیں"); return; }
     const allMixLabels = Array.from(new Set(rows.flatMap(r => (r.mixMaterials || []).map(m => m.label.trim()).filter(Boolean)))).sort();
-    const headerMain = [`منصور بلاک فیکٹری - روزانہ پیداوار رپورٹ`];
+    const headerMain = [`منصور بلاک فیکٹری - روزانہ پیداوار رپورٹ - asal hisab`];
     const headerSummary = [`تاریخ: ${getPKDate()} | ریکارڈ: ${rows.length} | بلاکس: ${rows.reduce((s,r)=>s+r.blocksCount,0)} | بوری: ${rows.reduce((s,r)=>s+r.cementBags,0)} | کل بل: ${rows.reduce((s,r)=>s+(r.totalBill||r.dailyWages||0),0)} روپے`];
     const tableHeader = ["تاریخ","بلاک نام","سائز","تعداد (نغ)","بوری","ریٹ","مزدوری","پیٹرول بل","کھانا بل","دیگر بل",...allMixLabels.map(l => `مکس: ${l} ریڑھی`),...allMixLabels.map(l => `مکس: ${l} روپے`),"تمام مکس تفصیل","کل بل","مکس خرچ","فی بلاک خرچ","بجلی ماہانہ؟","حالت"];
     const sheetData: (string | number)[][] = [
@@ -353,7 +378,7 @@ export default function BlockDailyPage() {
     <div className="min-h-screen bg-gray-50 py-1 sm:py-3" dir="rtl">
       <div className="max-w-[1024px] mx-auto px-1.5 sm:px-3 space-y-2 sm:space-y-3">
         <div className="bg-white border rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-sm">
-          <h1 className="font-bold text-[12px] sm:text-[15px] mb-2">🧱 روزانہ پیداوار - No Batch - ٹرالی 60 ریڑھی {editingId && <span className="text-orange-600 text-[9px]">(ترمیم)</span>}</h1>
+          <h1 className="font-bold text-[12px] sm:text-[15px] mb-2">🧱 روزانہ پیداوار - اصل ریڑھی حساب {editingId && <span className="text-orange-600 text-[9px]">(ترمیم)</span>}</h1>
           <div className="space-y-2 sm:space-y-3">
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
               <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
@@ -385,7 +410,7 @@ export default function BlockDailyPage() {
               </div>
             </div>
             <div className="border-t pt-2">
-              <label className="font-bold text-[10px] sm:text-[11px]">مکس میٹریل - {mixCost} روپے (ریڑھی حساب)</label>
+              <label className="font-bold text-[10px] sm:text-[11px]">مکس میٹریل - {mixCost} روپے (اصل ریڑھی حساب)</label>
               {mixMaterials.map((m, idx) => (
                 <div key={idx} className="flex gap-1 mt-1.5">
                   <input value={m.label} onChange={e=>updateMix(idx, "label", e.target.value)} placeholder="میٹریل" className="flex-1 border p-1.5 rounded-lg text-[10px] sm:text-[11px]" />
@@ -400,10 +425,10 @@ export default function BlockDailyPage() {
                   const val = e.target.value;
                   setNewMixLabel(val);
                   const stock = trolleyStocks.find(s => s.material === val || s.normalizedMaterial === val.toLowerCase());
-                  if (stock) setNewMixRate(Number(Number(stock.avgRate).toFixed(2)));
+                  if (stock) setNewMixRate(Number((stock.perRairiRate || stock.avgRate || 0).toFixed(2)));
                 }} className="flex-1 border p-1.5 rounded-lg text-[10px] bg-white">
                   <option value="">میٹریل منتخب کریں</option>
-                  {trolleyStocks.map(s => <option key={s.localId} value={s.material}>{s.material} ({s.totalRairi} ریڑھی @ {Number(s.avgRate).toFixed(2)} روپے)</option>)}
+                  {trolleyStocks.map(s => <option key={s.localId} value={s.material}>{s.material} ({s.totalRairi} ریڑھی @ {Number(s.perRairiRate || s.avgRate).toFixed(2)} روپے)</option>)}
                 </select>
                 <input type="number" value={newMixRairi || ""} onChange={e=>setNewMixRairi(Number(e.target.value))} placeholder="ریڑھی" className="w-[50px] border p-1.5 rounded-lg text-[10px] bg-white" />
                 <input type="number" value={newMixRate || ""} onChange={e=>setNewMixRate(Number(e.target.value))} placeholder="ریٹ" className="w-[60px] border p-1.5 rounded-lg text-[10px] bg-white" />
