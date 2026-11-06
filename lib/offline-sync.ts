@@ -1,4 +1,4 @@
-import { offlineDB, calcProfit, calcTotal } from "./offline-db";
+import { offlineDB, calcProfit, calcTotal, getSalesForCustomer } from "./offline-db";
 import type { 
   OfflineSale, OfflineSaleItem, OfflineBlockDaily, 
   BlockCategory, PaymentType, BillEntry, MixMaterialEntry,
@@ -152,11 +152,12 @@ export async function saveSaleOffline(data: SaleInput): Promise<string> {
       const normalized = data.customerName.trim().toLowerCase();
       const existing = await offlineDB.customers.where("normalizedName").equals(normalized).first();
       if (existing && !existing.isPaid) {
+        const mergedIds = Array.from(new Set([...(existing.saleIds || []), localId]));
         await offlineDB.customers.update(existing.localId, {
           totalUdhar: rnd(existing.totalUdhar + totalSell),
           totalBusiness: rnd(existing.totalBusiness + totalSell),
-          saleIds: [...(existing.saleIds || []), localId],
-          billsCount: rnd((existing.billsCount || 0) + 1),
+          saleIds: mergedIds,
+          billsCount: mergedIds.length,
           lastUdharDate: saleDate, synced: 0,
         });
         await offlineDB.sales.update(localId, { customerId: existing.localId });
@@ -285,7 +286,6 @@ export async function saveTrolleyOffline(data: TrolleyInput): Promise<string> {
   const actualRairi = rnd(data.actualRairi || data.rairiInTrolley || data.rairiPerTrolley || FROZEN_RAIRI);
   const rairiPer = actualRairi;
   const totalRairi = actualRairi * quantity;
-  // ✅ ASAL RATE
   const perRairi = Number((price / actualRairi).toFixed(2));
 
   const entry: OfflineTrolleyEntry = {
@@ -342,7 +342,6 @@ export async function closeTrolleyOffline(data: TrolleyCloseInput): Promise<void
       totalRairi: actualRairi,
       actualRairi: actualRairi,
       rairiPerTrolley: actualRairi,
-      // ✅ ASAL RATE
       perRairiRate: realRate,
       status: "CLOSED", 
       synced: 0,
@@ -376,7 +375,25 @@ export async function syncOfflineSales(): Promise<{ synced: number }> {
           localId: s.localId, userId: s.userId,
         }),
       });
-      if (res.ok) { await offlineDB.sales.update(s.localId, { synced: 1 }); await offlineDB.syncQueue.where("localId").equals(s.localId).delete(); synced++; }
+      if (res.ok) {
+        const json = await res.json().catch(()=> ({} as { data?: { _id?: string } }));
+        const serverId = (json as { data?: { _id?: string } })?.data?._id;
+        if (serverId) {
+          await offlineDB.sales.update(s.localId, { _id: serverId, synced: 1 });
+          // ✅ FIX: Customer ke saleIds me serverId bhi add karo
+          if (s.customerId) {
+            const cust = await offlineDB.customers.get(s.customerId);
+            if (cust) {
+              const merged = Array.from(new Set([...(cust.saleIds||[]), serverId, s.localId]));
+              await offlineDB.customers.update(cust.localId, { saleIds: merged, billsCount: merged.length });
+            }
+          }
+        } else {
+          await offlineDB.sales.update(s.localId, { synced: 1 });
+        }
+        await offlineDB.syncQueue.where("localId").equals(s.localId).delete(); 
+        synced++;
+      }
     } catch {}
   }
   return { synced };
@@ -479,3 +496,6 @@ export async function syncAllOffline(): Promise<{ sales: number; blockDaily: num
 if (typeof window !== "undefined") { 
   window.addEventListener("online", () => { void syncAllOffline(); }); 
 }
+
+// ✅ Export helper for Khata page
+export { getSalesForCustomer } from "./offline-db";

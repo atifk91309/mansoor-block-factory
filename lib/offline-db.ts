@@ -18,7 +18,7 @@ export type MixMaterialEntry = {
   label: string; 
   qty: string;
   rairi: number;
-  rate: number; // asal rate - price / asal rairi
+  rate: number;
   amount: number;
   quantity: number;
   unit: StockUnit;
@@ -217,11 +217,8 @@ export interface SyncQueueItem {
 }
 
 function rnd(n: number): number { return Math.round(n || 0); }
-
 const FROZEN_RAIRI = 60;
-
 type LegacyStock = OfflineTrolleyStock & { totalRairi?: number; rairiPerUnit?: number; totalQty?: number };
-type LegacyProduct = OfflineBlockProduct & { rairiPerTrolley?: number; buyPricePerRairi?: number; totalRairi?: number };
 
 export class OfflineDB extends Dexie {
   blockProducts!: Table<OfflineBlockProduct, string>;
@@ -232,12 +229,10 @@ export class OfflineDB extends Dexie {
   syncQueue!: Table<SyncQueueItem, number>;
   trolleyEntries!: Table<OfflineTrolleyEntry, string>;
   trolleyStock!: Table<OfflineTrolleyStock, string>;
-
   get products(): Table<OfflineBlockProduct, string> { return this.blockProducts; }
 
   constructor() {
     super("MansoorBlockFactoryOfflineV1");
-
     this.version(1).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, productId, userId, synced, createdAt, date",
@@ -245,7 +240,6 @@ export class OfflineDB extends Dexie {
       blockDaily: "localId, _id, userId, synced, date, createdAt",
       syncQueue: "++id, type, localId, createdAt",
     });
-
     this.version(22).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
@@ -268,7 +262,6 @@ export class OfflineDB extends Dexie {
         s.unit = s.unit || "trolley";
       });
     });
-
     this.version(23).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
@@ -284,8 +277,6 @@ export class OfflineDB extends Dexie {
       const zeroIds = all.filter(s => (s.totalRairi || 0) <= 0 || (s.remainingRairi || 0) <= 0).map(s => s.localId);
       if (zeroIds.length > 0) await tStock.bulkDelete(zeroIds);
     });
-
-    // ✅ V24 - ASAL HISAB - actual rairi se rate
     this.version(24).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
@@ -314,8 +305,17 @@ export class OfflineDB extends Dexie {
         }
       });
     });
-
     this.version(25).stores({
+      blockProducts: "localId, _id, userId, synced, name, category, createdAt",
+      sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
+      customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
+      blockDaily: "localId, _id, userId, synced, date, createdAt, blockType, blocksCount",
+      syncQueue: "++id, type, localId, createdAt",
+      monthlyExpenses: "month, _id, userId, synced, createdAt",
+      trolleyEntries: "localId, _id, userId, synced, normalizedMaterial, status, createdAt, date",
+      trolleyStock: "localId, _id, userId, synced, normalizedMaterial, createdAt",
+    });
+    this.version(26).stores({
       blockProducts: "localId, _id, userId, synced, name, category, createdAt",
       sales: "localId, _id, userId, synced, createdAt, date, customerName, paymentType, invoiceNo",
       customers: "localId, _id, name, normalizedName, userId, synced, totalUdhar, isPaid, createdAt",
@@ -362,13 +362,8 @@ export async function deductTrolleyOffline(mixes: MixMaterialEntry[]): Promise<v
     if (!stock) continue;
     const newUsed = rnd((stock.usedRairi || 0) + (m.rairi || 0));
     const newRemaining = Math.max(0, (stock.totalRairi || 0) - newUsed);
-    await offlineDB.trolleyStock.update(stock.localId, {
-      usedRairi: newUsed,
-      remainingRairi: newRemaining,
-    });
-    if (newRemaining <= 0) {
-      await offlineDB.trolleyStock.delete(stock.localId);
-    }
+    await offlineDB.trolleyStock.update(stock.localId, { usedRairi: newUsed, remainingRairi: newRemaining });
+    if (newRemaining <= 0) await offlineDB.trolleyStock.delete(stock.localId);
   }
 }
 
@@ -379,10 +374,7 @@ export async function revertTrolleyOffline(mixes: MixMaterialEntry[]): Promise<v
     if (!stock) continue;
     const newUsed = Math.max(0, rnd((stock.usedRairi || 0) - (m.rairi || 0)));
     const newRemaining = Math.max(0, (stock.totalRairi || 0) - newUsed);
-    await offlineDB.trolleyStock.update(stock.localId, {
-      usedRairi: newUsed,
-      remainingRairi: newRemaining,
-    });
+    await offlineDB.trolleyStock.update(stock.localId, { usedRairi: newUsed, remainingRairi: newRemaining });
   }
 }
 
@@ -393,18 +385,21 @@ export async function cleanupZeroTrolleyStock(): Promise<number> {
   return zeroIds.length;
 }
 
+// ✅ FIXED: _id + localId dono save karo taake logout/login ke baad bhi mile
 export async function upsertOfflineCustomer(sale: OfflineSale, village = "", phone = ""): Promise<string | null> {
   const name = (sale.customerName || "").trim();
   if (!name || name.toLowerCase() === "walk-in") return null;
   const normalized = name.toLowerCase();
   const saleTotal = rnd(sale.totalSell || sale.total || 0);
+  const saleRef = sale._id || sale.localId; // ✅ FIX
   const existing = await offlineDB.customers.where("normalizedName").equals(normalized).first();
   if (existing && !existing.isPaid) {
+    const merged = Array.from(new Set([...(existing.saleIds || []), saleRef, sale.localId, ...(sale._id ? [sale._id] : [])]));
     await offlineDB.customers.update(existing.localId, {
       totalUdhar: rnd(existing.totalUdhar + saleTotal),
       totalBusiness: rnd(existing.totalBusiness + saleTotal),
-      saleIds: [...(existing.saleIds || []), sale.localId],
-      billsCount: (existing.billsCount || 1) + 1,
+      saleIds: merged,
+      billsCount: merged.length,
       lastUdharDate: new Date().toISOString(),
       synced: 0,
     });
@@ -412,7 +407,7 @@ export async function upsertOfflineCustomer(sale: OfflineSale, village = "", pho
   } else {
     const localId = `cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     await offlineDB.customers.add({
-      localId, saleIds: [sale.localId], name, normalizedName: normalized,
+      localId, saleIds: [saleRef], name, normalizedName: normalized,
       phone, village, totalUdhar: saleTotal, totalBusiness: saleTotal,
       lastUdharDate: new Date().toISOString(), synced: 0,
       createdAt: new Date().toISOString(), billsCount: 1, isPaid: false, paidAmount: 0,
@@ -420,6 +415,17 @@ export async function upsertOfflineCustomer(sale: OfflineSale, village = "", pho
     });
     return localId;
   }
+}
+
+// ✅ NEW: Customer ke bills nikalne ka helper — offline + online dono IDs se
+export async function getSalesForCustomer(customer: OfflineCustomer): Promise<OfflineSale[]> {
+  if (!customer?.saleIds?.length) return [];
+  const all = await offlineDB.sales.toArray();
+  return all.filter(s => 
+    customer.saleIds.includes(s.localId) || 
+    (s._id && customer.saleIds.includes(s._id)) ||
+    (s._id && customer.saleIds.includes(s.localId) && s.localId === s._id)
+  );
 }
 
 export async function addOfflineWusool(customerLocalId: string, amount: number, note = ""): Promise<WusoolHistoryEntry | null> {

@@ -13,21 +13,44 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 type LeanSale = {
   _id: Types.ObjectId;
-  productName: string;
+  productName?: string;
   productId?: Types.ObjectId;
   category?: string;
-  quantity: number;
-  sellPrice: number;
-  total: number;
-  profit: number;
+  quantity?: number;
+  sellPrice?: number;
+  total?: number;
+  totalSell?: number;
+  totalAmount?: number;
+  profit?: number;
   createdAt: Date;
   status?: string;
+  items?: Array<{
+    productName?: string;
+    name?: string;
+    quantity?: number;
+    qty?: number;
+    sellPrice?: number;
+    price?: number;
+    total?: number;
+    totalSell?: number;
+    category?: string;
+  }>;
 };
 
-function rnd(n: number): number { return Math.round(Number(n) || 0); }
+// ✅ FIX: number | undefined | null accept karega — ts(2345) khatam
+function rnd(n: number | undefined | null): number { 
+  return Math.round(Number(n) || 0); 
+}
+
+function getUserFilter(userId: string) {
+  if (Types.ObjectId.isValid(userId)) {
+    return { userId: { $in: [new Types.ObjectId(userId), userId] } };
+  }
+  return { userId };
+}
 
 function getUnitLabel(name: string, cat?: string): string {
-  const n = name.toLowerCase();
+  const n = (name || "").toLowerCase();
   const c = (cat || "").toLowerCase();
   if (c === "block" || n.includes("block") || n.includes("khahta") || n.includes("shaga") || n.includes("slim") || n.includes("concar")) {
     return "Block";
@@ -37,33 +60,52 @@ function getUnitLabel(name: string, cat?: string): string {
 
 export async function GET(_req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await dbConnect();
     const { id } = await params;
     if (!id || !Types.ObjectId.isValid(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-    const userId = new Types.ObjectId(session.user.id);
-    const customer = await Customer.findOne({ _id: id, userId }).lean();
+    const rawUserId = session.user.id;
+    const userFilter = getUserFilter(rawUserId);
+
+    const customer = await Customer.findOne({ _id: id, ...userFilter }).lean();
     if (!customer) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const saleIds = customer.saleIds || [];
-    const sales = (saleIds.length > 0 ? await Sale.find({ _id: { $in: saleIds } }).sort({ createdAt: 1 }).lean() : []) as unknown as LeanSale[];
+    const sales = (saleIds.length > 0 ? await Sale.find({ _id: { $in: saleIds }, ...userFilter }).sort({ createdAt: 1 }).lean() : []) as unknown as LeanSale[];
 
-    const bills = sales.map((s) => ({
-      _id: s._id.toString(),
-      productName: s.productName,
-      productId: s.productId?.toString(),
-      category: s.category || "",
-      quantity: rnd(s.quantity),
-      sellPrice: rnd(s.sellPrice),
-      total: rnd(s.total),
-      profit: rnd(s.profit),
-      createdAt: s.createdAt,
-      status: s.status || "completed",
-      unitLabel: getUnitLabel(s.productName, s.category), // ✅ FIX: Block vs trolly
-    }));
+    const bills = sales.flatMap((s) => {
+      if (s.items && s.items.length > 0) {
+        return s.items.map((it) => ({
+          _id: s._id.toString(),
+          productName: it.productName || it.name || s.productName || "Block",
+          productId: s.productId?.toString(),
+          category: it.category || s.category || "",
+          quantity: rnd(it.quantity ?? it.qty ?? s.quantity ?? 0),
+          sellPrice: rnd(it.sellPrice ?? it.price ?? s.sellPrice ?? 0),
+          total: rnd(it.total ?? it.totalSell ?? s.total ?? s.totalSell ?? s.totalAmount ?? 0),
+          profit: rnd(s.profit ?? 0),
+          createdAt: s.createdAt,
+          status: s.status || "completed",
+          unitLabel: getUnitLabel(it.productName || s.productName || "", it.category || s.category),
+        }));
+      }
+      return [{
+        _id: s._id.toString(),
+        productName: s.productName || "Block",
+        productId: s.productId?.toString(),
+        category: s.category || "",
+        quantity: rnd(s.quantity ?? 0),
+        sellPrice: rnd(s.sellPrice ?? 0),
+        total: rnd(s.total ?? s.totalSell ?? s.totalAmount ?? 0),
+        profit: rnd(s.profit ?? 0),
+        createdAt: s.createdAt,
+        status: s.status || "completed",
+        unitLabel: getUnitLabel(s.productName || "", s.category),
+      }];
+    });
 
     return NextResponse.json({
       customer: {
@@ -83,21 +125,21 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await dbConnect();
     const { id } = await params;
     if (!id || !Types.ObjectId.isValid(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-    const userId = new Types.ObjectId(session.user.id);
-    const customer = await Customer.findOne({ _id: id, userId });
+    const rawUserId = session.user.id;
+    const userFilter = getUserFilter(rawUserId);
+
+    const customer = await Customer.findOne({ _id: id, ...userFilter });
     if (!customer) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Optional: delete related sales too to keep stock clean
-    // Comment out if you want to keep sales history
     if (customer.saleIds?.length > 0) {
-      await Sale.deleteMany({ _id: { $in: customer.saleIds }, userId });
+      await Sale.deleteMany({ _id: { $in: customer.saleIds }, ...userFilter });
     }
 
     await Customer.deleteOne({ _id: customer._id });

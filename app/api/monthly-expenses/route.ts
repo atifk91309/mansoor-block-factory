@@ -29,22 +29,27 @@ type MonthlyBody = {
   userId?: string;
   _id?: string;
 };
+type SessionUser = { user?: { id?: string } };
 
-function rnd(n: number): number { return Math.round(n || 0); }
+function rnd(n: number): number { return Math.round(Number(n) || 0); }
 
-type UserFilter = { userId: string; month?: string } | { $or: [{ userId: Types.ObjectId }, { userId: string }]; month?: string };
+function toObjectIdIfValid(id: string): Types.ObjectId | string {
+  return Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : id;
+}
 
-function getUserFilter(userId: string, month?: string): UserFilter {
-  const base = month ? { month } : {};
-  if (Types.ObjectId.isValid(userId)) {
-    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }], ...base } as UserFilter;
-  }
-  return { userId: userId, ...base } as UserFilter;
+function getUserFilter(userId: string, month?: string) {
+  const filter: { userId: { $in: (Types.ObjectId | string)[] } | string; month?: string } = {
+    userId: Types.ObjectId.isValid(userId) 
+      ? { $in: [new Types.ObjectId(userId), userId] } 
+      : userId,
+  };
+  if (month) filter.month = month;
+  return filter;
 }
 
 export async function GET(req: NextRequest) {
   await connectDB();
-  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
+  const session = (await getServerSession(authOptions)) as SessionUser | null;
   const queryUserId = req.nextUrl.searchParams.get("userId");
   const userId = session?.user?.id || queryUserId;
   if (!userId) return NextResponse.json({ data: [] });
@@ -64,10 +69,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "month required YYYY-MM" }, { status: 400 });
   }
 
-  const session = (await getServerSession(authOptions)) as { user?: { id?: string } } | null;
-  const userId = session?.user?.id || body.userId;
-  if (!userId) return NextResponse.json({ error: "userId missing" }, { status: 400 });
+  const session = (await getServerSession(authOptions)) as SessionUser | null;
+  const userIdRaw = session?.user?.id || body.userId;
+  if (!userIdRaw) return NextResponse.json({ error: "userId missing" }, { status: 400 });
 
+  const userId = toObjectIdIfValid(userIdRaw);
   const batchId = body.batchId;
   const electricity = rnd(body.electricity || 0);
   const rent = rnd(body.rent || 0);
@@ -85,12 +91,13 @@ export async function POST(req: NextRequest) {
   const costPerBlock = totalBlocks > 0 ? Number((totalMonthly / totalBlocks).toFixed(2)) : 0;
   const grandCostPerBlock = totalBlocks > 0 ? Number(((totalDailyBill + totalMonthly) / totalBlocks).toFixed(2)) : 0;
 
+  // ✅ FIX: $in filter se upsert taake duplicate na bane
   const doc = await MonthlyExpense.findOneAndUpdate(
-    { userId, month: body.month },
+    { ...getUserFilter(userIdRaw), month: body.month },
     {
       month: body.month,
       batchId,
-      userId,
+      userId, // ObjectId store
       electricity,
       rent,
       other,

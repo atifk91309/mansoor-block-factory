@@ -30,22 +30,12 @@ type RecentSale = {
 type TopItem = { _id: string; totalQty: number; totalSale: number; count: number };
 
 type Block = {
-  total: number;
-  profit: number;
-  profitPositive: number;
-  profitNegative: number;
-  count: number;
-  cash: number;
-  credit: number;
-  buy: number;
-  blockCount: number;
+  total: number; profit: number; profitPositive: number; profitNegative: number;
+  count: number; cash: number; credit: number; buy: number; blockCount: number;
 };
 
 type ReportsApi = {
-  today: Block;
-  month: Block;
-  year: Block;
-  all: Block;
+  today: Block; month: Block; year: Block; all: Block;
   stock: { stockValue: number; stockValueSell: number; lowCount: number; totalStock: number };
   khata: { totalUdhar: number; customers: number; totalWusool: number; wusoolCustomers: number };
   production: {
@@ -78,6 +68,27 @@ function fmt(n: number): string {
   return Math.round(n || 0).toLocaleString();
 }
 
+function calcProduction(offlineDaily: OfflineBlockDaily[]) {
+  const now = new Date();
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const prodToday = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
+  const prodMonth = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
+  const prodAll = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
+
+  for (const d of offlineDaily) {
+    const blocks = Math.round(Number(d.blocksCount) || 0);
+    const cement = Math.round(Number(d.cementBags) || 0);
+    const wages = Math.round(Number(d.dailyWages) || 0);
+    const date = new Date(d.date || d.createdAt);
+    prodAll.totalBlocks += blocks; prodAll.totalCement += cement; prodAll.totalWages += wages; prodAll.count++;
+    if (date >= startOfMonth) { prodMonth.totalBlocks += blocks; prodMonth.totalCement += cement; prodMonth.totalWages += wages; prodMonth.count++; }
+    if (date >= startOfToday) { prodToday.totalBlocks += blocks; prodToday.totalCement += cement; prodToday.totalWages += wages; prodToday.count++; }
+  }
+  return { today: prodToday, month: prodMonth, all: prodAll };
+}
+
 export default function MansoorBlockDashboard() {
   const isOnline = useIsOnline();
   const isOffline = !isOnline;
@@ -89,13 +100,14 @@ export default function MansoorBlockDashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [pendingCount, setPendingCount] = useState<number>(0);
 
-useEffect(() => {
-  const ctrl = new AbortController();
-  const load = async () => {
-    try {
-      setLoading(true);
-      const offlineNow = typeof window !== "undefined" && !window.navigator.onLine;
-      if (offlineNow) {
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const load = async () => {
+      try {
+        setLoading(true);
+        const offlineNow = typeof window !== "undefined" && !window.navigator.onLine;
+
+        // ✅ Hamesha offline daily lo taake 1900 na kho jaye
         const [offlineProds, offlineSales, offlineCustomers, offlineDaily, pendingAll] = await Promise.all([
           offlineDB.blockProducts.toArray(),
           offlineDB.sales.orderBy("createdAt").reverse().toArray(),
@@ -103,6 +115,8 @@ useEffect(() => {
           offlineDB.blockDaily.toArray(),
           offlineDB.sales.where("synced").equals(0).toArray(),
         ]);
+
+        const production = calcProduction(offlineDaily);
 
         const mappedProds: Product[] = offlineProds.map((p) => ({
           _id: p._id || p.localId,
@@ -113,9 +127,6 @@ useEffect(() => {
           stock: p.stock,
           stockMode: p.stockMode || "limited",
         }));
-
-        setProducts(mappedProds);
-        setPendingCount(pendingAll.length);
 
         const mappedSales: RecentSale[] = offlineSales.slice(0, 8).map((s) => ({
           _id: s._id || s.localId,
@@ -128,70 +139,76 @@ useEffect(() => {
           createdAt: s.createdAt,
           items: s.items.map((it) => ({ productName: it.productName, quantity: it.quantity })),
         }));
-        setRecentSales(mappedSales);
 
-        const now = new Date();
-        const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        
-        const prodToday = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
-        const prodMonth = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
-        const prodAll = { totalBlocks: 0, totalCement: 0, totalWages: 0, count: 0 };
+        if (offlineNow) {
+          setProducts(mappedProds);
+          setPendingCount(pendingAll.length);
+          setRecentSales(mappedSales);
 
-        offlineDaily.forEach((d: OfflineBlockDaily) => {
-          const blocks = Number(d.blocksCount || 0);
-          const cement = Number(d.cementBags || 0);
-          const wages = Number(d.dailyWages || 0);
-          const date = new Date(d.date || d.createdAt);
-          prodAll.totalBlocks += blocks; prodAll.totalCement += cement; prodAll.totalWages += wages; prodAll.count += 1;
-          if (date >= startOfMonth) { prodMonth.totalBlocks += blocks; prodMonth.totalCement += cement; prodMonth.totalWages += wages; prodMonth.count += 1; }
-          if (date >= startOfToday) { prodToday.totalBlocks += blocks; prodToday.totalCement += cement; prodToday.totalWages += wages; prodToday.count += 1; }
-        });
+          const stockValue = mappedProds.reduce((a, p) => a + p.stock * (p.buyPriceAvg || 0), 0);
+          const stockValueSell = mappedProds.reduce((a, p) => a + p.stock * p.sellPrice, 0);
+          const lowCount = mappedProds.filter((p) => p.stockMode !== "unlimited" && p.stock > 0 && p.stock <= 10).length;
+          const totalStock = mappedProds.reduce((a, p) => a + p.stock, 0);
+          const totalUdhar = offlineCustomers.filter((c) => !c.isPaid).reduce((a, c) => a + (c.totalUdhar || 0), 0);
 
-        let tT = 0, tP = 0, tC = 0, tBlockCount = 0;
-        offlineSales.forEach((s) => {
-          const d = new Date(s.createdAt);
-          if (d >= startOfToday) { tT += s.totalSell || s.total || 0; tP += s.totalProfit || s.profit || 0; tC++; tBlockCount += s.totalQuantity || s.quantity || 0; }
-        });
+          let tT = 0, tP = 0, tC = 0, tBlockCount = 0;
+          let mT = 0, mP = 0, mC = 0, mBlockCount = 0;
+          let aT = 0, aP = 0, aC = 0, aBlockCount = 0;
+          const now = new Date();
+          const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        const stockValue = mappedProds.reduce((a, p) => a + p.stock * (p.buyPriceAvg || 0), 0);
-        const stockValueSell = mappedProds.reduce((a, p) => a + p.stock * p.sellPrice, 0);
-        const lowCount = mappedProds.filter((p) => p.stockMode !== "unlimited" && p.stock > 0 && p.stock <= 10).length;
-        const totalUdhar = offlineCustomers.filter((c) => !c.isPaid).reduce((a, c) => a + (c.totalUdhar || 0), 0);
+          for (const s of offlineSales) {
+            const d = new Date(s.createdAt);
+            const sell = s.totalSell || s.total || 0;
+            const profit = s.totalProfit || s.profit || 0;
+            const qty = s.totalQuantity || s.quantity || 0;
+            aT += sell; aP += profit; aC++; aBlockCount += qty;
+            if (d >= startOfMonth) { mT += sell; mP += profit; mC++; mBlockCount += qty; }
+            if (d >= startOfToday) { tT += sell; tP += profit; tC++; tBlockCount += qty; }
+          }
 
-        setReports({
-          today: { total: tT, profit: tP, count: tC, profitPositive: tP, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: tBlockCount },
-          month: { total: 0, profit: 0, count: 0, profitPositive: 0, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: 0 },
-          year: { total: 0, profit: 0, count: 0, profitPositive: 0, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: 0 },
-          all: { total: 0, profit: 0, count: 0, profitPositive: 0, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: 0 },
-          stock: { stockValue, stockValueSell, lowCount, totalStock: 0 },
-          khata: { totalUdhar, customers: offlineCustomers.filter((c) => !c.isPaid).length, totalWusool: 0, wusoolCustomers: 0 },
-          production: { today: prodToday, month: prodMonth, all: prodAll },
-          categoryBreakdown: [],
-          todayRecent: mappedSales,
-        });
-      } else {
-        const [prodRes, reportRes, topRes, pendingArr] = await Promise.all([
-          fetch(`/api/block-products?limit=200`, { signal: ctrl.signal }),
-          fetch(`/api/reports`, { signal: ctrl.signal }),
-          fetch(`/api/sales/top?filter=${topFilter}`, { signal: ctrl.signal }),
-          offlineDB.sales.where("synced").equals(0).toArray(),
-        ]);
-        const prodJson = await prodRes.json() as ProductsApiResponse;
-        const reportJson = await reportRes.json() as ReportsApi;
-        const topJson = await topRes.json() as TopApiResponse;
-        const productList: Product[] = Array.isArray(prodJson) ? prodJson : prodJson.products || prodJson.blockProducts || [];
-        setProducts(productList);
-        setReports(reportJson);
-        setRecentSales(reportJson.todayRecent || []);
-        setTopProducts(topJson.top || []);
-        setPendingCount(pendingArr.length);
+          setReports({
+            today: { total: tT, profit: tP, count: tC, profitPositive: tP, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: tBlockCount },
+            month: { total: mT, profit: mP, count: mC, profitPositive: mP, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: mBlockCount },
+            year: { total: aT, profit: aP, count: aC, profitPositive: aP, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: aBlockCount },
+            all: { total: aT, profit: aP, count: aC, profitPositive: aP, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: aBlockCount },
+            stock: { stockValue, stockValueSell, lowCount, totalStock },
+            khata: { totalUdhar, customers: offlineCustomers.filter((c) => !c.isPaid).length, totalWusool: 0, wusoolCustomers: 0 },
+            production,
+            categoryBreakdown: [],
+            todayRecent: mappedSales,
+          });
+        } else {
+          const [prodRes, reportRes, topRes] = await Promise.all([
+            fetch(`/api/block-products?limit=200`, { signal: ctrl.signal }),
+            fetch(`/api/reports`, { signal: ctrl.signal }),
+            fetch(`/api/sales/top?filter=${topFilter}`, { signal: ctrl.signal }),
+          ]);
+          const prodJson = await prodRes.json() as ProductsApiResponse;
+          const reportJson = await reportRes.json() as ReportsApi;
+          const topJson = await topRes.json() as TopApiResponse;
+
+          const productList: Product[] = Array.isArray(prodJson) ? prodJson : prodJson.products || prodJson.blockProducts || [];
+
+          // ✅ FIX: API ka production 0 bhi ho to offline wala 1900 rakh lo
+          reportJson.production = production;
+
+          setProducts(productList);
+          setReports(reportJson);
+          setRecentSales(reportJson.todayRecent || mappedSales);
+          setTopProducts(topJson.top || []);
+          setPendingCount(pendingAll.length);
+        }
+      } catch {
+        // silent
+      } finally {
+        setLoading(false);
       }
-    } catch {} finally { setLoading(false); }
-  };
-  void load();
-  return () => ctrl.abort();
-}, [topFilter]);
+    };
+    void load();
+    return () => ctrl.abort();
+  }, [topFilter]);
 
   if (loading) return <p className="p-8 text-center text-[12px]">منصور بلاک فیکٹری لوڈ ہو رہی ہے...</p>;
 
@@ -248,7 +265,7 @@ useEffect(() => {
 
         <div className="bg-white border rounded-xl overflow-hidden">
           <div className="p-3 border-b flex justify-between"><b className="text-[13px]">کم اسٹاک بلاک (≤10)</b><Link href="/dashboard/block-products" className="text-[10px] bg-red-100 px-2 py-0.5 rounded-full">اسٹاک دیکھیں</Link></div>
-          {lowStock.length === 0 ? <p className="p-4 text-[11px] text-gray-400 text-center">تمام اسٹاک ٹھیک ہے — 0 کم • ریت لامحدود</p> : lowStock.map((p, i) => (<div key={`${p._id}-${i}`} className="p-2 border-b flex justify-between text-[11px]"><span><b>{p.name}</b> ({p.category}) • اسٹاک {p.stock} • خرید {fmt(p.buyPriceAvg)} روپے • فروخت {fmt(p.sellPrice)} روپے</span><span className="text-red-600 font-bold">صرف {p.stock} باقی</span></div>))}
+          {lowStock.length === 0 ? <p className="p-4 text-[11px] text-gray-400 text-center">تمام اسٹاک ٹھیک ہے — {reports?.stock.lowCount || 0} کم • ریت لامحدود</p> : lowStock.map((p, i) => (<div key={`${p._id}-${i}`} className="p-2 border-b flex justify-between text-[11px]"><span><b>{p.name}</b> ({p.category}) • اسٹاک {p.stock} • خرید {fmt(p.buyPriceAvg)} روپے • فروخت {fmt(p.sellPrice)} روپے</span><span className="text-red-600 font-bold">صرف {p.stock} باقی</span></div>))}
           <div className="p-3 border-t">
             <div className="flex gap-1 mb-2">{(["today", "weekly", "monthly", "all"] as const).map((f) => (<button key={f} onClick={() => setTopFilter(f)} className={`px-3 py-1 rounded-full text-[10px] font-bold capitalize ${topFilter === f ? "bg-black text-white" : "bg-gray-100"}`}>{f==="today"?"آج":f==="weekly"?"ہفتہ":f==="monthly"?"مہینہ":"سب"}</button>))}</div>
             {topProducts.slice(0, 5).map((t, i) => (<div key={`${t._id}-${i}`} className="flex justify-between text-[11px] py-1 border-b"><span>{i + 1}. {t._id} • {t.totalQty} نغ</span><span className="font-bold">{fmt(t.totalSale)} روپے</span></div>))}

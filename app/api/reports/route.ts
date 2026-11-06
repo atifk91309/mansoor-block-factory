@@ -8,7 +8,6 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { Types } from "mongoose";
-import { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,17 +17,15 @@ type SaleAgg = {
   profitPositive: number; profitNegative: number;
   cash: number; udhar: number; blockCount: number;
 };
-
 type KhataAgg = { totalUdhar: number; count: number };
 type StockAgg = { stockValue: number; stockValueSell: number; lowCount: number; totalStock: number };
 type DailyAgg = { totalBlocks: number; totalCement: number; totalWages: number; count: number; totalMix: number; totalBill: number };
-
-type SaleMatch = { userId: Types.ObjectId; createdAt?: { $gte: Date; $lt: Date } };
 type EmptySale = {
   count: number; total: number; profit: number;
   profitPositive: number; profitNegative: number;
   buy: number; cash: number; credit: number; blockCount: number;
 };
+type SessionUser = { user?: { id?: string } };
 
 function emptySale(): EmptySale {
   return { count: 0, total: 0, profit: 0, profitPositive: 0, profitNegative: 0, buy: 0, cash: 0, credit: 0, blockCount: 0 };
@@ -95,9 +92,17 @@ function getPKTRange() {
   return { startTodayUTC, startTomorrowUTC, startMonthUTC, startYearUTC };
 }
 
-export async function GET(req: NextRequest) {
+// ✅ FIX: String + ObjectId dono match karega
+function getUserFilter(userId: string) {
+  if (Types.ObjectId.isValid(userId)) {
+    return { userId: { $in: [new Types.ObjectId(userId), userId] } };
+  }
+  return { userId: userId };
+}
+
+export async function GET() {
   try {
-    const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
+    const session = await getServerSession(authOptions) as SessionUser | null;
     if (!session?.user?.id) {
       return NextResponse.json({
         today: emptySale(), month: emptySale(), year: emptySale(), all: emptySale(),
@@ -109,10 +114,11 @@ export async function GET(req: NextRequest) {
     }
 
     await dbConnect();
-    const userId = new Types.ObjectId(session.user.id);
+    const rawUserId = session.user.id;
+    const userFilter = getUserFilter(rawUserId);
     const { startTodayUTC, startTomorrowUTC, startMonthUTC, startYearUTC } = getPKTRange();
 
-    const saleAgg = (match: SaleMatch) =>
+    const saleAgg = (match: Record<string, unknown>) =>
       Sale.aggregate<SaleAgg>([
         { $match: match },
         {
@@ -132,7 +138,7 @@ export async function GET(req: NextRequest) {
 
     const stockAgg = () =>
       BlockProduct.aggregate<StockAgg>([
-        { $match: { userId, stock: { $gte: 0 } } },
+        { $match: { ...userFilter, stock: { $gte: 0 } } },
         {
           $group: {
             _id: null,
@@ -146,34 +152,34 @@ export async function GET(req: NextRequest) {
 
     const dailyAgg = (from: Date, to: Date) =>
       BlockDaily.aggregate<DailyAgg>([
-        { $match: { userId, date: { $gte: from, $lt: to } } },
-        { 
-          $group: { 
-            _id: null, 
-            totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } }, 
-            totalCement: { $sum: "$cementBags" }, 
-            totalWages: { $sum: "$dailyWages" }, 
+        { $match: { ...userFilter, date: { $gte: from, $lt: to } } },
+        {
+          $group: {
+            _id: null,
+            totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } },
+            totalCement: { $sum: "$cementBags" },
+            totalWages: { $sum: "$dailyWages" },
             count: { $sum: 1 },
             totalMix: { $sum: "$mixCost" },
             totalBill: { $sum: "$totalBill" },
-          } 
+          },
         },
       ]);
 
     const allProdAgg = () =>
       BlockDaily.aggregate<DailyAgg>([
-        { $match: { userId } }, 
-        { 
-          $group: { 
-            _id: null, 
-            totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } }, 
-            totalCement: { $sum: "$cementBags" }, 
-            totalWages: { $sum: "$dailyWages" }, 
+        { $match: userFilter },
+        {
+          $group: {
+            _id: null,
+            totalBlocks: { $sum: { $ifNull: ["$blocksCount", 0] } },
+            totalCement: { $sum: "$cementBags" },
+            totalWages: { $sum: "$dailyWages" },
             count: { $sum: 1 },
             totalMix: { $sum: "$mixCost" },
             totalBill: { $sum: "$totalBill" },
-          } 
-        }
+          },
+        },
       ]);
 
     const [
@@ -182,19 +188,19 @@ export async function GET(req: NextRequest) {
       todayProd, monthProd, allProd,
       categoryBreakdown, todayRecent, monthlyExp,
     ] = await Promise.all([
-      saleAgg({ userId, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }),
-      saleAgg({ userId, createdAt: { $gte: startMonthUTC, $lt: startTomorrowUTC } }),
-      saleAgg({ userId, createdAt: { $gte: startYearUTC, $lt: startTomorrowUTC } }),
-      saleAgg({ userId }),
-      Customer.aggregate<KhataAgg>([{ $match: { userId, isPaid: false, totalUdhar: { $gt: 0.5 } } }, { $group: { _id: null, totalUdhar: { $sum: "$totalUdhar" }, count: { $sum: 1 } } }]),
-      Customer.aggregate<KhataAgg>([{ $match: { userId, isPaid: true } }, { $group: { _id: null, totalUdhar: { $sum: "$paidAmount" }, count: { $sum: 1 } } }]),
+      saleAgg({ ...userFilter, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }),
+      saleAgg({ ...userFilter, createdAt: { $gte: startMonthUTC, $lt: startTomorrowUTC } }),
+      saleAgg({ ...userFilter, createdAt: { $gte: startYearUTC, $lt: startTomorrowUTC } }),
+      saleAgg(userFilter),
+      Customer.aggregate<KhataAgg>([{ $match: { ...userFilter, isPaid: false, totalUdhar: { $gt: 0.5 } } }, { $group: { _id: null, totalUdhar: { $sum: "$totalUdhar" }, count: { $sum: 1 } } }]),
+      Customer.aggregate<KhataAgg>([{ $match: { ...userFilter, isPaid: true } }, { $group: { _id: null, totalUdhar: { $sum: "$paidAmount" }, count: { $sum: 1 } } }]),
       stockAgg(),
       dailyAgg(startTodayUTC, startTomorrowUTC),
       dailyAgg(startMonthUTC, startTomorrowUTC),
       allProdAgg(),
-      Sale.aggregate([{ $match: { userId } }, { $unwind: "$items" }, { $group: { _id: "$items.category", total: { $sum: { $multiply: ["$items.quantity", "$items.sellPrice"] } }, count: { $sum: 1 }, qty: { $sum: "$items.quantity" } } }, { $sort: { total: -1 } }]),
-      Sale.find({ userId, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }).sort({ createdAt: -1 }).limit(8).lean(),
-      MonthlyExpense.find({ userId }).sort({ month: -1 }).lean(),
+      Sale.aggregate([{ $match: userFilter }, { $unwind: "$items" }, { $group: { _id: "$items.category", total: { $sum: { $multiply: ["$items.quantity", "$items.sellPrice"] } }, count: { $sum: 1 }, qty: { $sum: "$items.quantity" } } }, { $sort: { total: -1 } }]),
+      Sale.find({ ...userFilter, createdAt: { $gte: startTodayUTC, $lt: startTomorrowUTC } }).sort({ createdAt: -1 }).limit(8).lean(),
+      MonthlyExpense.find(userFilter).sort({ month: -1 }).lean(),
     ]);
 
     return NextResponse.json({
@@ -219,7 +225,8 @@ export async function GET(req: NextRequest) {
       monthlyExpenses: monthlyExp,
     });
   } catch (err) {
-    console.error("GET /api/reports error:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("GET /api/reports error:", message);
     return NextResponse.json({
       today: emptySale(), month: emptySale(), year: emptySale(), all: emptySale(),
       khata: { totalUdhar: 0, customers: 0, totalWusool: 0, wusoolCustomers: 0 },

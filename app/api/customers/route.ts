@@ -1,6 +1,6 @@
 import dbConnect from "@/lib/mongodb";
 import Customer from "@/models/Customer";
-import "@/models/Sale"; // ensure Sale model registered for populate
+import "@/models/Sale";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
@@ -38,20 +38,30 @@ type PopulatedSale = {
   totalAmount?: number;
 };
 
+type SessionUser = { user?: { id?: string } };
+
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
+
+function getUserFilter(userId: string) {
+  if (Types.ObjectId.isValid(userId)) {
+    return { userId: { $in: [new Types.ObjectId(userId), userId] } };
+  }
+  return { userId: userId };
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as SessionUser | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     await dbConnect();
 
     const sp = req.nextUrl.searchParams;
     const search = sp.get("search")?.trim() || "";
     const status = sp.get("status") || "pending";
-    const userId = new Types.ObjectId(session.user.id);
+    const rawUserId = session.user.id;
+    const userFilter = getUserFilter(rawUserId);
 
-    let query: Record<string, unknown> = { userId };
+    let query: Record<string, unknown> = { ...userFilter };
 
     if (status !== "all") {
       query = { ...query, isPaid: status === "paid" };
@@ -70,7 +80,7 @@ export async function GET(req: NextRequest) {
       .populate({
         path: "saleIds",
         model: "Sale",
-        select: "items totalAmount createdAt date",
+        select: "items totalAmount totalSell total totalQuantity quantity createdAt date invoiceNo",
         options: { sort: { createdAt: -1 } },
       })
       .sort({ isPaid: 1, lastUdharDate: -1 })
@@ -79,7 +89,6 @@ export async function GET(req: NextRequest) {
     const customers = customersRaw.map((c) => {
       const sales = (c.saleIds as unknown as PopulatedSale[]) || [];
       
-      // ✅ Flatten all items from all sales - FIX for Rs 0 bug
       const allItems = sales.flatMap((sale) =>
         (sale.items || []).map((it) => {
           const prodName = it.productName || it.name || it.blockName || "Block";
@@ -103,7 +112,7 @@ export async function GET(req: NextRequest) {
         totalBusiness: rnd(c.totalBusiness),
         paidAmount: rnd(c.paidAmount),
         billsCount: c.billsCount || sales.length || 1,
-        items: allItems, // ✅ Now frontend will get exact product name + price
+        items: allItems,
         saleIds: sales,
       };
     });
@@ -119,21 +128,23 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions) as SessionUser | null;
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     await dbConnect();
     const body = (await req.json()) as CustomerBody;
 
     if (!body.name?.trim()) return NextResponse.json({ error: "Name required" }, { status: 400 });
 
-    const userId = new Types.ObjectId(session.user.id);
+    const rawUserId = session.user.id;
+    const userFilter = getUserFilter(rawUserId);
+    const userIdObj = Types.ObjectId.isValid(rawUserId) ? new Types.ObjectId(rawUserId) : rawUserId;
     const trimmedName = body.name.trim();
     const normalized = trimmedName.toLowerCase();
     const total = rnd(body.totalUdhar || 0);
     const totalBiz = rnd(body.totalBusiness || body.totalUdhar || 0);
     const saleObjectId = body.saleId && Types.ObjectId.isValid(body.saleId) ? new Types.ObjectId(body.saleId) : undefined;
 
-    const existing = await Customer.findOne({ userId, normalizedName: normalized, isPaid: false });
+    const existing = await Customer.findOne({ ...userFilter, normalizedName: normalized, isPaid: false });
     if (existing) {
       existing.totalUdhar = rnd(existing.totalUdhar + total);
       existing.totalBusiness = rnd(existing.totalBusiness + totalBiz);
@@ -141,7 +152,7 @@ export async function POST(req: NextRequest) {
         if (!existing.saleIds) existing.saleIds = [];
         const already = existing.saleIds.some((id: Types.ObjectId) => id.toString() === saleObjectId.toString());
         if (!already) existing.saleIds.push(saleObjectId);
-        existing.billsCount = (existing.billsCount || 0) + 1;
+        existing.billsCount = existing.saleIds.length;
       }
       existing.lastUdharDate = new Date();
       if (body.phone?.trim()) existing.phone = body.phone.trim();
@@ -160,7 +171,7 @@ export async function POST(req: NextRequest) {
       saleIds: saleObjectId ? [saleObjectId] : [],
       billsCount: saleObjectId ? 1 : 0,
       lastUdharDate: new Date(),
-      userId,
+      userId: userIdObj,
       isPaid: false,
       paidAmount: 0,
       wusoolHistory: [],

@@ -26,12 +26,19 @@ type BlockDailyBody = {
   trolleyMixCost?: number; mixCost?: number; totalBill?: number;
   isMonthlyElectricity?: boolean;
 };
+type SessionUser = { user?: { id?: string } };
 
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
 
+function toObjectIdIfValid(id: string): Types.ObjectId | string {
+  return Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : id;
+}
+
+// ✅ FIX: userId hamesha ObjectId aur String dono se match karega
 function getUserFilter(userId: string) {
-  if (Types.ObjectId.isValid(userId)) {
-    return { $or: [{ userId: new Types.ObjectId(userId) }, { userId: userId }] };
+  const objId = Types.ObjectId.isValid(userId) ? new Types.ObjectId(userId) : null;
+  if (objId) {
+    return { userId: { $in: [objId, userId] } };
   }
   return { userId: userId };
 }
@@ -53,19 +60,18 @@ function mergeSameMaterial(mixes: MixBody[]): MixBody[] {
 }
 
 async function recalcAllStocks(userId: string): Promise<void> {
-  const all = await TrolleyEntryModel.find({ 
-    ...getUserFilter(userId)
-  }).lean();
+  const userFilter = getUserFilter(userId);
+  const all = await TrolleyEntryModel.find(userFilter).lean();
   
   const map = new Map<string, { rairi: number; cost: number }>();
   for (const e of all) {
     const norm = String(e.normalizedMaterial || "").toLowerCase().trim();
     if (!norm) continue;
-    const eff = rnd(e.actualRairi ?? e.rairiInTrolley ?? 0);
-    const rem = Math.max(0, eff - rnd(e.totalUsed ?? 0));
+    const eff = rnd((e as { actualRairi?: number }).actualRairi ?? (e as { rairiInTrolley?: number }).rairiInTrolley ?? 0);
+    const rem = Math.max(0, eff - rnd((e as { totalUsed?: number }).totalUsed ?? 0));
     if (rem <= 0) continue;
     const cur = map.get(norm) ?? { rairi: 0, cost: 0 };
-    const rate = Number((e.perRairiRate || 0).toFixed(2));
+    const rate = Number(((e as { perRairiRate?: number }).perRairiRate || 0).toFixed(2));
     cur.rairi += rem;
     cur.cost += rem * rate;
     map.set(norm, cur);
@@ -73,9 +79,9 @@ async function recalcAllStocks(userId: string): Promise<void> {
   
   for (const [norm, v] of map) {
     const avg = v.rairi > 0 ? Number((v.cost / v.rairi).toFixed(2)) : 0;
-    const matName = all.find((e) => String(e.normalizedMaterial || "").toLowerCase().trim() === norm)?.material || norm;
+    const matName = all.find((e) => String((e as { normalizedMaterial?: string }).normalizedMaterial || "").toLowerCase().trim() === norm)?.material || norm;
     await TrolleyStockModel.updateOne(
-      { ...getUserFilter(userId), normalizedMaterial: norm },
+      { ...userFilter, normalizedMaterial: norm },
       {
         $set: { 
           material: matName, 
@@ -93,21 +99,16 @@ async function recalcAllStocks(userId: string): Promise<void> {
     );
   }
 
-  const allStocks = await TrolleyStockModel.find({ ...getUserFilter(userId) }).lean();
+  const allStocks = await TrolleyStockModel.find(userFilter).lean();
   const zeroNorms = allStocks.filter(s => (s.totalRairi || 0) <= 0).map(s => s.normalizedMaterial);
   if (zeroNorms.length > 0) {
-    await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: zeroNorms } });
-  }
-  const existingNorms = allStocks.map(s => s.normalizedMaterial);
-  const toDelete = existingNorms.filter(n => !map.has(n));
-  if (toDelete.length > 0) {
-    await TrolleyStockModel.deleteMany({ ...getUserFilter(userId), normalizedMaterial: { $in: toDelete } });
+    await TrolleyStockModel.deleteMany({ ...userFilter, normalizedMaterial: { $in: zeroNorms } });
   }
 }
 
 export async function GET(req: NextRequest) {
   await connectDB();
-  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
+  const session = await getServerSession(authOptions) as SessionUser | null;
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId") || session?.user?.id;
   if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
@@ -122,11 +123,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   await connectDB();
   const body = await req.json() as BlockDailyBody;
-  const session = await getServerSession(authOptions) as { user?: { id?: string } } | null;
-  const userId = body.userId || session?.user?.id;
-  if (!userId) return NextResponse.json({ error: "userId" }, { status: 400 });
+  const session = await getServerSession(authOptions) as SessionUser | null;
+  const userIdRaw = body.userId || session?.user?.id;
+  if (!userIdRaw) return NextResponse.json({ error: "userId" }, { status: 400 });
   if (!body.blocksMade?.trim()) return NextResponse.json({ error: "blocksMade name required" }, { status: 400 });
 
+  const userId = toObjectIdIfValid(userIdRaw); // ✅ Store as ObjectId if valid
   const batchId = body.batchId;
   const mazdoorRate = rnd(body.mazdoorRatePerBlock || body.ratePerBlock || 3);
   const count = rnd(body.blocksCount || 0);
@@ -148,7 +150,6 @@ export async function POST(req: NextRequest) {
     .filter((m) => m.label?.trim() && (m.rairi || 0) > 0)
     .map((m): MixBody => {
       const rairi = rnd(m.rairi || 0);
-      // ✅ ASAL RATE - client se jo 309.09 aaya usi se
       const ratePerRairi = Number((m.rate || 0).toFixed(2));
       return {
         label: m.label.trim(),
@@ -187,56 +188,59 @@ export async function POST(req: NextRequest) {
     localId: body.localId || `daily_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
   });
 
-    for (const mix of cleanMix) {
+  // Trolley deduct
+  for (const mix of cleanMix) {
     if (mix.rairi <= 0) continue;
     const normalized = mix.label.toLowerCase().trim();
     let deducted = false;
 
     if (mix.trolleyEntryId) {
       const updated = await TrolleyEntryModel.findOneAndUpdate(
-        { 
-          ...getUserFilter(userId), 
-          localId: mix.trolleyEntryId,
-          // status hatao — CLOSED pe bhi deduct hona chahiye
-        },
+        { ...getUserFilter(userIdRaw), localId: mix.trolleyEntryId },
         { $inc: { totalUsed: mix.rairi } }
       );
       if (updated) deducted = true;
     }
     
     if (!deducted) {
-      // ✅ CLOSED + OPEN dono me se sab se purana jisme stock bacha ho
       const allForMat = await TrolleyEntryModel.find({
-        ...getUserFilter(userId), 
+        ...getUserFilter(userIdRaw), 
         normalizedMaterial: normalized,
       }).sort({ date: 1 }).lean();
       
       let need = mix.rairi;
       for (const ent of allForMat) {
         if (need <= 0) break;
-        const eff = rnd(ent.actualRairi ?? ent.rairiInTrolley ?? 0);
-        const rem = Math.max(0, eff - rnd(ent.totalUsed ?? 0));
+        const eff = rnd((ent as { actualRairi?: number }).actualRairi ?? (ent as { rairiInTrolley?: number }).rairiInTrolley ?? 0);
+        const rem = Math.max(0, eff - rnd((ent as { totalUsed?: number }).totalUsed ?? 0));
         if (rem <= 0) continue;
         const use = Math.min(rem, need);
         await TrolleyEntryModel.updateOne({ _id: ent._id }, { $inc: { totalUsed: use } });
         need -= use;
-        deducted = true;
       }
     }
   }
-  await recalcAllStocks(userId);
+  await recalcAllStocks(userIdRaw);
 
   const monthStr = `${dailyDate.getFullYear()}-${String(dailyDate.getMonth() + 1).padStart(2, "0")}`;
-  await recalcMonthlyExpense(userId, monthStr);
+  await recalcMonthlyExpense(userIdRaw, monthStr);
 
+  // ✅ FIX: BlockProduct update bhi ObjectId + String dono se
   const existing = await BlockProduct.findOne({
-    userId, name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+    ...getUserFilter(userIdRaw),
+    name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
   });
   if (existing) {
     await BlockProduct.updateOne(
       { _id: existing._id },
       { $inc: { stock: count }, $set: { lastPurchaseDate: daily.date } }
     );
+  } else {
+    await BlockProduct.create({
+      name, category: "block", stock: count, stockMode: "limited",
+      buyPriceAvg: daily.costPerBlock, sellPrice: 45,
+      userId, // ObjectId store
+    });
   }
 
   return NextResponse.json(daily);
