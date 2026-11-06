@@ -7,553 +7,130 @@ import type { OfflineBlockDaily, BillEntry, MixMaterialEntry, OfflineTrolleyStoc
 import * as XLSX from "xlsx";
 
 const API_TROLLEY = "/api/trolley-stock";
-
 type BlockTypeOption = "4 inch" | "5 inch" | "6 inch";
-type FormState = { 
-  date: string; 
-  cementBags: number; 
-  cementRate: number;
-  blocksMade: string; 
-  blocksCount: number; 
-  blockType: BlockTypeOption; 
-  ratePerBlock: number; 
-  isMonthlyElectricity: boolean;
-};
-type BlockDailyDoc = {
-  _id: string; localId?: string; date: string; cementBags: number; cementRate?: number; blocksMade: string; blocksCount: number;
-  dailyWages: number; ratePerBlock: number; blockType: string; userId: string; createdAt: string;
-  bills?: BillEntry[]; mixMaterials?: MixMaterialEntry[]; totalBill?: number; mixCost?: number; 
-  costPerBlock?: number; isMonthlyElectricity?: boolean;
-};
+type FormState = { date: string; cementBags: number; cementRate: number; blocksMade: string; blocksCount: number; blockType: BlockTypeOption; ratePerBlock: number; isMonthlyElectricity: boolean; };
+type BlockDailyDoc = { _id: string; localId?: string; date: string; cementBags: number; cementRate?: number; blocksMade: string; blocksCount: number; dailyWages: number; ratePerBlock: number; blockType: string; userId: string; createdAt: string; bills?: BillEntry[]; mixMaterials?: MixMaterialEntry[]; totalBill?: number; mixCost?: number; costPerBlock?: number; isMonthlyElectricity?: boolean; };
 type OfflineDailyWithRate = OfflineBlockDaily & { cementRate?: number; cementCost?: number };
-type TrolleyApiStock = OfflineTrolleyStock & { 
-  actualRairi?: number; 
-  totalPrice?: number; 
-  totalCost?: number;
-  perRairiRate?: number;
-  avgRate?: number;
-};
+type TrolleyApiStock = OfflineTrolleyStock & { actualRairi?: number; totalPrice?: number; totalCost?: number; perRairiRate?: number; avgRate?: number; };
 
 const DEFAULT_BLOCKS = ["شگہ بلاک", "فل کرش بلاک", "مکس کرش بلاک", "ون کھتہ", "3 نمبر کھتہ", "کنکر کھتہ"];
-
-function getPKDate(): string {
-  const d = new Date(); d.setMinutes(d.getMinutes() + d.getTimezoneOffset() + 300);
-  return d.toISOString().split("T")[0];
-}
+function getPKDate(): string { const d = new Date(); d.setMinutes(d.getMinutes() + d.getTimezoneOffset() + 300); return d.toISOString().split("T")[0]; }
 function rnd(n: number): number { return Math.round(Number(n) || 0); }
-function isElectricLabel(label: string): boolean {
-  const l = label.toLowerCase();
-  return l.includes("electric") || l.includes("bijli") || l.includes("بجلی") || l.includes("wapda");
-}
+function isElectricLabel(label: string): boolean { const l = label.toLowerCase(); return l.includes("electric") || l.includes("bijli") || l.includes("بجلی") || l.includes("wapda"); }
 
 export default function BlockDailyPage() {
-  const [form, setForm] = useState<FormState>({
-    date: getPKDate(), 
-    cementBags: 17,
-    cementRate: 1400, 
-    blocksMade: "6 انچ بلاک", 
-    blocksCount: 798, 
-    blockType: "6 inch", 
-    ratePerBlock: 3, 
-    isMonthlyElectricity: false,
-  });
+  const [form, setForm] = useState<FormState>({ date: getPKDate(), cementBags: 17, cementRate: 1400, blocksMade: "6 انچ بلاک", blocksCount: 798, blockType: "6 inch", ratePerBlock: 3, isMonthlyElectricity: false, });
   const [bills, setBills] = useState<BillEntry[]>([{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]);
-  const [newBillLabel, setNewBillLabel] = useState(""); 
-  const [newBillAmount, setNewBillAmount] = useState(0);
+  const [newBillLabel, setNewBillLabel] = useState(""); const [newBillAmount, setNewBillAmount] = useState(0);
   const [mixMaterials, setMixMaterials] = useState<MixMaterialEntry[]>([]);
-  const [newMixLabel, setNewMixLabel] = useState(""); 
-  const [newMixRairi, setNewMixRairi] = useState(0);
-  const [newMixRate, setNewMixRate] = useState(0);
-  const [trolleyStocks, setTrolleyStocks] = useState<TrolleyApiStock[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [newMixLabel, setNewMixLabel] = useState(""); const [newMixRairi, setNewMixRairi] = useState(0); const [newMixRate, setNewMixRate] = useState(0);
+  const [trolleyStocks, setTrolleyStocks] = useState<TrolleyApiStock[]>([]); const [saving, setSaving] = useState(false);
   const [blockOptions, setBlockOptions] = useState<string[]>(DEFAULT_BLOCKS);
-  const [history, setHistory] = useState<OfflineDailyWithRate[]>([]);
-  const [filter, setFilter] = useState(""); 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingLocalId, setEditingLocalId] = useState<string | null>(null);
+  const [history, setHistory] = useState<OfflineDailyWithRate[]>([]); const [filter, setFilter] = useState(""); const [editingId, setEditingId] = useState<string | null>(null); const [editingLocalId, setEditingLocalId] = useState<string | null>(null);
 
   const wages = useMemo(() => rnd(form.blocksCount * form.ratePerBlock), [form.blocksCount, form.ratePerBlock]);
-  const displayBills = useMemo(() => bills, [bills]);
-
-  const { totalBill, mixCost, cementCost, petrolCost } = useMemo(() => {
-    const extra = displayBills.reduce((s, b) => {
-      if (form.isMonthlyElectricity && isElectricLabel(b.label)) return s;
-      return s + (b.amount || 0);
-    }, 0);
-    const petrol = displayBills.find(b => b.label.includes("پیٹرول") || b.label.toLowerCase().includes("petrol"))?.amount || 0;
+  const { totalBill, mixCost, cementCost } = useMemo(() => {
+    const extra = bills.reduce((s, b) => { if (form.isMonthlyElectricity && isElectricLabel(b.label)) return s; return s + (b.amount || 0); }, 0);
     const tMix = mixMaterials.reduce((s, m) => s + (m.amount || 0), 0);
     const cCost = rnd(form.cementBags * form.cementRate);
-    return { 
-      mixCost: tMix, 
-      cementCost: cCost, 
-      petrolCost: petrol,
-      totalBill: wages + extra + tMix + cCost
-    };
-  }, [displayBills, mixMaterials, wages, form.isMonthlyElectricity, form.cementBags, form.cementRate]);
+    return { mixCost: tMix, cementCost: cCost, totalBill: wages + extra + tMix + cCost };
+  }, [bills, mixMaterials, wages, form.isMonthlyElectricity, form.cementBags, form.cementRate]);
 
   async function getUserId(): Promise<string> {
-    try { 
-      const res = await fetch("/api/auth/session", { cache: "no-store" }); 
-      if (res.ok) { 
-        const data = await res.json() as { user?: { id?: string; _id?: string } };
-        if (data?.user?.id) return data.user.id; 
-        if (data?.user?._id) return data.user._id; 
-      } 
-    } catch {}
-    const offlineUser = getOfflineUser() as { _id?: string; id?: string } | null;
-    return offlineUser?._id || offlineUser?.id || "offline_user";
+    try { const res = await fetch("/api/auth/session", { cache: "no-store" }); if (res.ok) { const data = await res.json() as { user?: { id?: string; _id?: string } }; if (data?.user?.id) return data.user.id; if (data?.user?._id) return data.user._id; } } catch {}
+    const offlineUser = getOfflineUser() as { _id?: string; id?: string } | null; return offlineUser?._id || offlineUser?.id || "offline_user";
   }
-
   async function loadHistory(): Promise<void> {
-    const offline = await offlineDB.blockDaily.toArray().catch((): OfflineDailyWithRate[] => []);
-    setHistory(offline.sort((a,b)=> b.date.localeCompare(a.date)));
-    try {
-      const userId = await getUserId();
-      const res = await fetch(`/api/block-daily?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
-      if (res.ok) {
-        const j = await res.json() as { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[] };
-        const data = j.data ?? j.blockDailies ?? [];
-        if (data.length > 0) {
-          const mapped: OfflineDailyWithRate[] = data.map((d) => ({
-            localId: d.localId || d._id || `daily_${d._id}`,
-            _id: d._id,
-            date: new Date(d.date).toISOString().split("T")[0],
-            cementBags: d.cementBags,
-            cementRate: d.cementRate || 1400,
-            cementCost: (d.cementBags || 0) * (d.cementRate || 1400),
-            blocksMade: d.blocksMade,
-            blocksCount: d.blocksCount,
-            dailyWages: d.dailyWages,
-            ratePerBlock: d.ratePerBlock,
-            mazdoorRatePerBlock: d.ratePerBlock,
-            labourCost: d.dailyWages,
-            blockType: d.blockType,
-            userId: d.userId,
-            synced: 1,
-            createdAt: d.createdAt,
-            bills: d.bills || [],
-            mixMaterials: d.mixMaterials || [],
-            totalBill: d.totalBill || d.dailyWages,
-            mixCost: d.mixCost || 0,
-            trolleyMixCost: d.mixCost || 0,
-            costPerBlock: d.costPerBlock || 0,
-            isMonthlyElectricity: d.isMonthlyElectricity || false,
-          } as OfflineDailyWithRate));
-          setHistory(mapped.sort((a,b) => b.date.localeCompare(a.date)));
-        }
-      }
-    } catch {}
+    const offline = await offlineDB.blockDaily.toArray().catch((): OfflineDailyWithRate[] => []); setHistory(offline.sort((a,b)=> b.date.localeCompare(a.date)));
+    try { const userId = await getUserId(); const res = await fetch(`/api/block-daily?userId=${encodeURIComponent(userId)}`, { cache: "no-store" }); if (res.ok) { const j = await res.json() as { data?: BlockDailyDoc[]; blockDailies?: BlockDailyDoc[] }; const data = j.data ?? j.blockDailies ?? []; if (data.length > 0) { const mapped: OfflineDailyWithRate[] = data.map((d) => ({ localId: d.localId || d._id || `daily_${d._id}`, _id: d._id, date: new Date(d.date).toISOString().split("T")[0], cementBags: d.cementBags, cementRate: d.cementRate || 1400, cementCost: (d.cementBags || 0) * (d.cementRate || 1400), blocksMade: d.blocksMade, blocksCount: d.blocksCount, dailyWages: d.dailyWages, ratePerBlock: d.ratePerBlock, mazdoorRatePerBlock: d.ratePerBlock, labourCost: d.dailyWages, blockType: d.blockType, userId: d.userId, synced: 1, createdAt: d.createdAt, bills: d.bills || [], mixMaterials: d.mixMaterials || [], totalBill: d.totalBill || d.dailyWages, mixCost: d.mixCost || 0, trolleyMixCost: d.mixCost || 0, costPerBlock: d.costPerBlock || 0, isMonthlyElectricity: d.isMonthlyElectricity || false, } as OfflineDailyWithRate)); setHistory(mapped.sort((a,b) => b.date.localeCompare(a.date))); } } } catch {}
   }
+  useEffect(() => { async function load(): Promise<void> { try { const products = await offlineDB.blockProducts.toArray().catch((): OfflineBlockProduct[] => []); if (products.length > 0) { const map = new Map<string, string>(); for (const p of products) { const name = p.name.trim(); if (!name) continue; const key = name.toLowerCase(); if (!map.has(key)) map.set(key, name); } const unique = Array.from(map.values()).sort((a, b) => a.localeCompare(b)); if (unique.length > 0) setBlockOptions(unique); } const stocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []); if (stocks.length > 0) { setTrolleyStocks(stocks as TrolleyApiStock[]); } try { const userId = await getUserId(); const res = await fetch(`${API_TROLLEY}?userId=${encodeURIComponent(userId)}`, { cache: "no-store" }); if (res.ok) { const j = await res.json() as { stock?: TrolleyApiStock[]; data?: TrolleyApiStock[] }; const list = j.stock ?? j.data ?? []; if (list.length > 0) { const fixed = list.map((s) => { const actual = s.actualRairi ?? s.totalRairi ?? 0; const totalCost = s.totalCost ?? s.totalPrice ?? 0; const rate = actual > 0 ? totalCost / actual : (s.perRairiRate ?? s.avgRate ?? 0); return { ...s, totalRairi: actual, perRairiRate: Number(rate.toFixed(2)), avgRate: Number(rate.toFixed(2)), }; }); setTrolleyStocks(fixed); for (const s of fixed) { await offlineDB.trolleyStock.put(s as OfflineTrolleyStock).catch(()=>{}); } } } } catch {} } catch {} void loadHistory(); } void load(); }, []);
 
-  useEffect(() => {
-    async function load(): Promise<void> {
-      try {
-        const products = await offlineDB.blockProducts.toArray().catch((): OfflineBlockProduct[] => []);
-        if (products.length > 0) {
-          const map = new Map<string, string>();
-          for (const p of products) { 
-            const name = p.name.trim(); if (!name) continue; const key = name.toLowerCase(); if (!map.has(key)) map.set(key, name); 
-          }
-          const unique = Array.from(map.values()).sort((a, b) => a.localeCompare(b));
-          if (unique.length > 0) setBlockOptions(unique);
-        }
-        const stocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []);
-        if (stocks.length > 0) {
-          setTrolleyStocks(stocks as TrolleyApiStock[]);
-        }
-        try {
-          const userId = await getUserId();
-          const res = await fetch(`${API_TROLLEY}?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
-          if (res.ok) {
-            const j = await res.json() as { stock?: TrolleyApiStock[]; data?: TrolleyApiStock[]; trolleyStocks?: TrolleyApiStock[] };
-            const list = j.stock ?? j.data ?? j.trolleyStocks ?? [];
-            if (list.length > 0) {
-              const fixed = list.map((s) => {
-                const actual = s.actualRairi ?? s.totalRairi ?? 0;
-                const totalCost = s.totalCost ?? s.totalPrice ?? 0;
-                const rate = actual > 0 ? totalCost / actual : (s.perRairiRate ?? s.avgRate ?? 0);
-                return {
-                  ...s,
-                  totalRairi: actual,
-                  perRairiRate: Number(rate.toFixed(2)),
-                  avgRate: Number(rate.toFixed(2)),
-                };
-              });
-              setTrolleyStocks(fixed);
-              for (const s of fixed) {
-                await offlineDB.trolleyStock.put(s as OfflineTrolleyStock).catch(()=>{});
-              }
-            }
-          }
-        } catch (e) {
-          console.log("API error", e);
-        }
-      } catch {}
-      void loadHistory();
-    }
-    void load();
-  }, []);
-
-  const addBill = (): void => { 
-    if (!newBillLabel.trim()) return; 
-    setBills([...bills, { label: newBillLabel.trim(), amount: rnd(newBillAmount || 0) }]); 
-    setNewBillLabel(""); 
-    setNewBillAmount(0); 
-  };
-  
-  const updateBill = (idx: number, field: "label"|"amount", val: string|number): void => { 
-    const copy = [...bills]; 
-    const target = copy[idx];
-    if (!target) return;
-    if (field === "label") target.label = String(val);
-    else target.amount = rnd(Number(val) || 0);
-    setBills(copy); 
-  };
-  
+  const addBill = (): void => { if (!newBillLabel.trim()) return; setBills([...bills, { label: newBillLabel.trim(), amount: rnd(newBillAmount || 0) }]); setNewBillLabel(""); setNewBillAmount(0); };
+  const updateBill = (idx: number, field: "label"|"amount", val: string|number): void => { const copy = [...bills]; const target = copy[idx]; if (!target) return; if (field === "label") target.label = String(val); else target.amount = rnd(Number(val) || 0); setBills(copy); };
   const removeBill = (idx: number): void => setBills(bills.filter((_, i) => i !== idx));
-
-  const addMix = (): void => { 
-    if (!newMixLabel.trim() || newMixRairi <= 0) return;
-    const stock = trolleyStocks.find(s => s.material === newMixLabel.trim() || s.normalizedMaterial === newMixLabel.toLowerCase().trim());
-    const stockRate = stock ? Number((stock.perRairiRate ?? stock.avgRate ?? 0).toFixed(2)) : 0;
-    const rate = newMixRate > 0 ? Number(newMixRate.toFixed(2)) : stockRate;
-    if (rate <= 0) {
-      alert(`ریٹ نہیں ملا - ${newMixLabel} کا ریٹ لکھیں`);
-      return;
-    }
-    const amount = rnd(newMixRairi * rate);
-    const entry: MixMaterialEntry = { 
-      label: newMixLabel.trim(), 
-      qty: `${newMixRairi} ریڑھی`, 
-      rairi: rnd(newMixRairi), 
-      rate: rate, 
-      amount,
-      quantity: rnd(newMixRairi),
-      unit: "trolley",
-      trolleyEntryId: stock?.localId || "",
-      batchId: "",
-    };
-    setMixMaterials([...mixMaterials, entry]); 
-    setNewMixLabel(""); setNewMixRairi(0); setNewMixRate(0); 
-  };
-
-  const updateMix = (idx: number, field: "label"|"rairi"|"rate", val: string|number): void => { 
-    const copy = [...mixMaterials]; 
-    const item = copy[idx];
-    if (!item) return;
-    if (field === "label") item.label = String(val);
-    if (field === "rairi") { 
-      item.rairi = rnd(Number(val)||0); 
-      item.qty = `${item.rairi} ریڑھی`; 
-      item.quantity = item.rairi;
-      item.amount = rnd(item.rairi * Number(item.rate || 0)); 
-    }
-    if (field === "rate") { 
-      item.rate = Number(Number(val)||0); 
-      item.amount = rnd(item.rairi * item.rate); 
-    }
-    setMixMaterials(copy); 
-  };
-  
+  const addMix = (): void => { if (!newMixLabel.trim() || newMixRairi <= 0) return; const stock = trolleyStocks.find(s => s.material === newMixLabel.trim() || s.normalizedMaterial === newMixLabel.toLowerCase().trim()); const stockRate = stock ? Number((stock.perRairiRate ?? stock.avgRate ?? 0).toFixed(2)) : 0; const rate = newMixRate > 0 ? Number(newMixRate.toFixed(2)) : stockRate; if (rate <= 0) { alert(`ریٹ نہیں ملا`); return; } const amount = rnd(newMixRairi * rate); const entry: MixMaterialEntry = { label: newMixLabel.trim(), qty: `${newMixRairi} ریڑھی`, rairi: rnd(newMixRairi), rate: rate, amount, quantity: rnd(newMixRairi), unit: "trolley", trolleyEntryId: stock?.localId || "", batchId: "", }; setMixMaterials([...mixMaterials, entry]); setNewMixLabel(""); setNewMixRairi(0); setNewMixRate(0); };
+  const updateMix = (idx: number, field: "label"|"rairi"|"rate", val: string|number): void => { const copy = [...mixMaterials]; const item = copy[idx]; if (!item) return; if (field === "label") item.label = String(val); if (field === "rairi") { item.rairi = rnd(Number(val)||0); item.qty = `${item.rairi} ریڑھی`; item.quantity = item.rairi; item.amount = rnd(item.rairi * Number(item.rate || 0)); } if (field === "rate") { item.rate = Number(Number(val)||0); item.amount = rnd(item.rairi * item.rate); } setMixMaterials(copy); };
   const removeMix = (idx: number): void => setMixMaterials(mixMaterials.filter((_, i) => i !== idx));
 
   async function handleSubmit(): Promise<void> {
     if (!form.blocksMade.trim() || form.blocksCount <= 0) { alert("نام اور تعداد چیک کریں"); return; }
-    if (mixMaterials.length === 0) {
-      if (!confirm("مکس میٹریل 0 ہے - کیا پھر بھی محفوظ کرنا ہے؟")) return;
-    }
     setSaving(true);
     try {
       const userId = await getUserId();
-      const payload = { 
-        date: form.date, 
-        cementBags: form.cementBags, 
-        cementRate: form.cementRate, 
-        cementCost,
-        blocksMade: form.blocksMade, 
-        blocksCount: form.blocksCount, 
-        blockType: form.blockType, 
-        ratePerBlock: form.ratePerBlock, 
-        isMonthlyElectricity: form.isMonthlyElectricity, 
-        dailyWages: wages, 
-        bills: bills.filter(b => b.label.trim()), 
-        mixMaterials: mixMaterials.map(m => ({ ...m, rate: Number(m.rate.toFixed(2)), amount: rnd(m.rairi * Number(m.rate.toFixed(2))) })), 
-        totalBill, mixCost, labourCost: wages, petrolCost,
-        costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0,
-        userId 
-      };
+      const payload = { date: form.date, cementBags: form.cementBags, cementRate: form.cementRate, cementCost, blocksMade: form.blocksMade, blocksCount: form.blocksCount, blockType: form.blockType, ratePerBlock: form.ratePerBlock, isMonthlyElectricity: form.isMonthlyElectricity, dailyWages: wages, bills: bills.filter(b => b.label.trim()), mixMaterials: mixMaterials.map(m => ({ ...m, rate: Number(m.rate.toFixed(2)), amount: rnd(m.rairi * Number(m.rate.toFixed(2))) })), totalBill, mixCost, labourCost: wages, costPerBlock: form.blocksCount>0 ? Number((totalBill/form.blocksCount).toFixed(2)) : 0, userId };
       if (editingId && editingLocalId) {
         try { await deleteBlockDailyOffline(editingLocalId); } catch { await offlineDB.blockDaily.delete(editingLocalId); }
-        if (navigator.onLine) {
-          try { await fetch(`/api/block-daily/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } catch {}
-        }
+        if (navigator.onLine) { try { await fetch(`/api/block-daily/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } catch {} }
         const newLocalId = await saveBlockDailyOffline({ ...payload, localId: editingLocalId } as BlockDailyInput);
-        if (navigator.onLine) {
-          try {
-            const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId: newLocalId }) });
-            if (res.ok) await offlineDB.blockDaily.update(newLocalId, { synced: 1 });
-          } catch {}
-        }
+        if (navigator.onLine) { try { const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId: newLocalId }) }); if (res.ok) await offlineDB.blockDaily.update(newLocalId, { synced: 1 }); } catch {} }
         setEditingId(null); setEditingLocalId(null);
       } else {
         const localId = await saveBlockDailyOffline(payload as BlockDailyInput);
-        if (navigator.onLine) { 
-          try { 
-            const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId }) }); 
-            if (res.ok) await offlineDB.blockDaily.update(localId, { synced: 1 }); 
-          } catch {} 
-        }
+        if (navigator.onLine) { try { const res = await fetch("/api/block-daily", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, localId }) }); if (res.ok) await offlineDB.blockDaily.update(localId, { synced: 1 }); } catch {} }
       }
-
-      await loadHistory(); 
-      const allStocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []);
-      setTrolleyStocks(allStocks as TrolleyApiStock[]);
-      setForm((f) => ({ ...f, date: getPKDate(), blocksCount: 798 }));
-      setBills([{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]); 
-      setMixMaterials([]);
+      await loadHistory(); const allStocks = await offlineDB.trolleyStock.toArray().catch((): OfflineTrolleyStock[] => []); setTrolleyStocks(allStocks as TrolleyApiStock[]); setForm((f) => ({ ...f, date: getPKDate(), blocksCount: 798 })); setBills([{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]); setMixMaterials([]);
     } finally { setSaving(false); }
   }
-
-  function handleEdit(item: OfflineDailyWithRate): void {
-    setForm({ 
-      date: item.date, 
-      cementBags: item.cementBags, 
-      cementRate: item.cementRate || 1400,
-      blocksMade: item.blocksMade, 
-      blocksCount: item.blocksCount, 
-      blockType: item.blockType as BlockTypeOption, 
-      ratePerBlock: item.ratePerBlock, 
-      isMonthlyElectricity: item.isMonthlyElectricity || false 
-    });
-    const oldBills = item.bills && item.bills.length > 0 ? item.bills : [{ label: "پیٹرول بل", amount: 0 }];
-    const fixedBills = oldBills.map(b => b.label.includes("مزدوری") ? { ...b, label: "پیٹرول بل", amount: 0 } : b);
-    setBills(fixedBills.length>0 ? fixedBills : [{ label: "پیٹرول بل", amount: 0 }, { label: "دوپہر کا کھانا", amount: 0 }]); 
-    setMixMaterials(item.mixMaterials || []);
-    setEditingId(item._id || item.localId); setEditingLocalId(item.localId); window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function handleDelete(item: OfflineDailyWithRate): Promise<void> {
-    if (!confirm(`حذف کریں ${item.blocksMade} - ${item.blocksCount} نغ؟`)) return;
-    try { await deleteBlockDailyOffline(item.localId); } catch { await offlineDB.blockDaily.delete(item.localId); }
-    if (navigator.onLine && item._id) {
-      try {
-        const userId = await getUserId();
-        await fetch(`/api/block-daily/${item._id}?userId=${userId}`, { method: "DELETE" });
-      } catch {}
-    }
-    setHistory((h) => h.filter((x) => x.localId !== item.localId));
-  }
-
+  function handleEdit(item: OfflineDailyWithRate): void { setForm({ date: item.date, cementBags: item.cementBags, cementRate: item.cementRate || 1400, blocksMade: item.blocksMade, blocksCount: item.blocksCount, blockType: item.blockType as BlockTypeOption, ratePerBlock: item.ratePerBlock, isMonthlyElectricity: item.isMonthlyElectricity || false }); setBills(item.bills && item.bills.length>0 ? item.bills : [{ label: "پیٹرول بل", amount: 0 }]); setMixMaterials(item.mixMaterials || []); setEditingId(item._id || item.localId); setEditingLocalId(item.localId); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  async function handleDelete(item: OfflineDailyWithRate): Promise<void> { if (!confirm(`حذف کریں ${item.blocksMade} - ${item.blocksCount} نغ؟`)) return; try { await deleteBlockDailyOffline(item.localId); } catch { await offlineDB.blockDaily.delete(item.localId); } if (navigator.onLine && item._id) { try { const userId = await getUserId(); await fetch(`/api/block-daily/${item._id}?userId=${userId}`, { method: "DELETE" }); } catch {} } setHistory((h) => h.filter((x) => x.localId !== item.localId)); }
   function exportExcel(): void {
-    const rows = history.filter((h) => !filter || h.blocksMade.toLowerCase().includes(filter.toLowerCase()));
-    if (rows.length === 0) { alert("کوئی ڈیٹا نہیں"); return; }
+    const rows = history.filter((h) => !filter || h.blocksMade.toLowerCase().includes(filter.toLowerCase())); if (rows.length === 0) { alert("کوئی ڈیٹا نہیں"); return; }
     const allMixLabels = Array.from(new Set(rows.flatMap(r => (r.mixMaterials || []).map(m => m.label.trim()).filter(Boolean)))).sort();
-    const headerMain = [`منصور بلاک فیکٹری - روزانہ پیداوار رپورٹ - asal hisab`];
-    const headerSummary = [`تاریخ: ${getPKDate()} | ریکارڈ: ${rows.length} | بلاکس: ${rows.reduce((s,r)=>s+r.blocksCount,0)} | بوری: ${rows.reduce((s,r)=>s+r.cementBags,0)} | کل بل: ${rows.reduce((s,r)=>s+(r.totalBill||r.dailyWages||0),0)} روپے`];
-    const tableHeader = ["تاریخ","بلاک نام","سائز","تعداد (نغ)","بوری","ریٹ","مزدوری","پیٹرول بل","کھانا بل","دیگر بل",...allMixLabels.map(l => `مکس: ${l} ریڑھی`),...allMixLabels.map(l => `مکس: ${l} روپے`),"تمام مکس تفصیل","کل بل","مکس خرچ","فی بلاک خرچ","بجلی ماہانہ؟","حالت"];
-    const sheetData: (string | number)[][] = [
-      headerMain, headerSummary, [], tableHeader,
-      ...rows.map((r) => {
-        const getBill = (name: string): number => r.bills?.find(b => b.label.includes(name) || b.label.toLowerCase().includes(name.toLowerCase()))?.amount || 0;
-        const other = (r.bills||[]).filter(b => !b.label.includes("پیٹرول") && !b.label.includes("کھانا") && !b.label.includes("مزدوری") && !isElectricLabel(b.label)).map(b=>`${b.label}: ${b.amount} روپے`).join(" | ");
-        const mixMapRairi = new Map((r.mixMaterials||[]).map(m => [m.label.trim(), m.rairi])); 
-        const mixMapRs = new Map((r.mixMaterials||[]).map(m => [m.label.trim(), m.amount]));
-        const mixColsRairi = allMixLabels.map(lbl => mixMapRairi.get(lbl) || "");
-        const mixColsRs = allMixLabels.map(lbl => mixMapRs.get(lbl) || "");
-        const allMix = (r.mixMaterials||[]).map(m=>`${m.label}:${m.rairi} ریڑھی x ${m.rate} روپے = ${m.amount} روپے`).join(" | ");
-        return [r.date, r.blocksMade, r.blockType, r.blocksCount, r.cementBags, r.ratePerBlock, r.dailyWages, getBill("پیٹرول") || getBill("پٹرول") || 0, getBill("کھانا"), other || "-", ...mixColsRairi, ...mixColsRs, allMix || "-", r.totalBill||r.dailyWages, r.mixCost||0, r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : Number(((r.totalBill||r.dailyWages||0)/(r.blocksCount||1)).toFixed(2)), r.isMonthlyElectricity ? "ہاں" : "نہیں", r.synced===1 ? "ہم آہنگ" : "زیر التواء"] as (string | number)[];
-      }),
-      [], ["خلاصہ"], ["کل بلاکس", rows.reduce((s,r)=>s+r.blocksCount,0)], ["کل بوری", rows.reduce((s,r)=>s+r.cementBags,0)], ["کل مکس خرچ", rows.reduce((s,r)=>s+(r.mixCost||0),0)], ["کل بل", rows.reduce((s,r)=>s+(r.totalBill||r.dailyWages||0),0)],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `روزانہ`);
-    XLSX.writeFile(wb, `منصور_${getPKDate()}_${rows.reduce((s,r)=>s+r.blocksCount,0)}بلاکس.xlsx`);
+    const tableHeader = ["تاریخ","بلاک نام","سائز","تعداد","بوری","بوری ریٹ","سیمنٹ لاگت","مزدوری ریٹ","مزدوری لاگت","پیٹرول بل","کھانا بل","دیگر بل",...allMixLabels.map(l => `مکس: ${l} ریڑھی`),...allMixLabels.map(l => `مکس: ${l} روپے`),"کل بل","مکس خرچ","فی بلاک خرچ"];
+    const sheetData: (string | number)[][] = [ ["منصور بلاک فیکٹری"], [`تاریخ: ${getPKDate()} | ریکارڈ: ${rows.length}`], [], tableHeader, ...rows.map((r) => { const getBill = (name: string): number => r.bills?.find(b => b.label.includes(name) || b.label.toLowerCase().includes(name.toLowerCase()))?.amount || 0; const other = (r.bills||[]).filter(b => !b.label.includes("پیٹرول") && !b.label.includes("کھانا") && !b.label.includes("مزدوری")).map(b=>`${b.label}: ${b.amount}`).join(" | "); const mixMapRairi = new Map((r.mixMaterials||[]).map(m => [m.label.trim(), m.rairi])); const mixMapRs = new Map((r.mixMaterials||[]).map(m => [m.label.trim(), m.amount])); return [r.date, r.blocksMade, r.blockType, r.blocksCount, r.cementBags, r.cementRate || 1400, r.cementCost||0, r.ratePerBlock, r.dailyWages, getBill("پیٹرول") || 0, getBill("کھانا"), other || "-", ...allMixLabels.map(lbl => mixMapRairi.get(lbl) || ""), ...allMixLabels.map(lbl => mixMapRs.get(lbl) || ""), r.totalBill||0, r.mixCost||0, r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"] as (string | number)[]; }), ];
+    const ws = XLSX.utils.aoa_to_sheet(sheetData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, `روزانہ`); XLSX.writeFile(wb, `منصور_${getPKDate()}.xlsx`);
   }
 
   const filtered = history.filter((h) => !filter || h.blocksMade.toLowerCase().includes(filter.toLowerCase()));
-  const grandTotal = filtered.reduce((s,r)=>s+(r.totalBill||r.dailyWages||0),0);
-  const grandMix = filtered.reduce((s,r)=>s+(r.mixCost||0),0);
-  const totalBlocks = filtered.reduce((s,r)=>s+r.blocksCount,0);
+  const grandTotal = filtered.reduce((s,r)=>s+(r.totalBill||0),0); const grandMix = filtered.reduce((s,r)=>s+(r.mixCost||0),0); const totalBlocks = filtered.reduce((s,r)=>s+r.blocksCount,0);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-1 sm:py-3 overflow-x-hidden" dir="rtl">
-      <div className="max-w-[1024px] mx-auto px-2 sm:px-3 space-y-2 sm:space-y-3">
-        <div className="bg-white border rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-sm">
-          <h1 className="font-bold text-[13px] sm:text-[15px] mb-3">🧱 روزانہ پیداوار - اصل ریڑھی حساب {editingId && <span className="text-orange-600 text-[10px]">(ترمیم)</span>}</h1>
-          <div className="space-y-3">
-            {/* تاریخ + سائز - mobile pe stack */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div><label className="text-[11px] font-bold text-gray-600">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
-              <div><label className="text-[11px] font-bold text-gray-600">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white"><option>4 inch</option><option>5 inch</option><option>6 inch</option></select></div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-bold text-gray-600">بلاک کا نام</label>
-              <select value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white">{blockOptions.map((name, idx) => (<option key={`${name}-${idx}`} value={name}>{name}</option>))}</select>
-              <input type="text" placeholder="یا نیا نام لکھیں" value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-2" />
-            </div>
-
-            {/* سیمنٹ - mobile pe 1 col */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <div><label className="text-[11px] font-bold text-gray-600">سیمنٹ بوری</label><input type="number" value={form.cementBags} onChange={(e)=>setForm({...form,cementBags:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
-              <div><label className="text-[11px] font-bold text-gray-600">بوری ریٹ</label><input type="number" value={form.cementRate} onChange={(e)=>setForm({...form,cementRate:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
-              <div><label className="text-[11px] font-bold text-gray-600">فی بلاک مزدوری</label><input type="number" value={form.ratePerBlock} onChange={(e)=>setForm({...form,ratePerBlock:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-blue-50 font-bold" /></div>
-            </div>
-
-            {/* بل / خرچہ - FIXED for mobile */}
-            <div className="border-t pt-3">
-              <label className="font-bold text-[12px]">بل / خرچہ - پیٹرول بل</label>
-              <div className="space-y-2 mt-2">
-                {displayBills.map((b, idx) => (
-                  <div key={idx} className="flex flex-col sm:flex-row gap-2 bg-gray-50 p-2 rounded-xl border">
-                    <input value={b.label} onChange={e=>updateBill(idx, "label", e.target.value)} placeholder="لیبل (پیٹرول بل)" className="flex-1 border p-3 rounded-xl text-[13px] bg-white" />
-                    <div className="flex gap-2">
-                      <input type="number" value={b.amount} onChange={e=>updateBill(idx, "amount", e.target.value)} placeholder="روپے" className="flex-1 sm:w-[100px] border p-3 rounded-xl text-[13px] font-bold bg-white" />
-                      <button onClick={()=>removeBill(idx)} className="px-4 bg-red-50 text-red-600 border border-red-200 rounded-xl text-[14px] font-bold">✕</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2 mt-3 bg-white p-2 rounded-xl border-2 border-dashed">
-                <input value={newBillLabel} onChange={e=>setNewBillLabel(e.target.value)} placeholder="نیا لیبل (مثلا ڈیزل)" className="flex-1 border p-3 rounded-xl text-[13px] bg-white" />
-                <div className="flex gap-2">
-                  <input type="number" value={newBillAmount} onChange={e=>setNewBillAmount(Number(e.target.value))} placeholder="روپے" className="flex-1 sm:w-[90px] border p-3 rounded-xl text-[13px] bg-white" />
-                  <button onClick={addBill} className="px-5 bg-black text-white rounded-xl font-bold text-[13px]">+ شامل</button>
-                </div>
-              </div>
-            </div>
-
-            {/* مکس میٹریل - FIXED for mobile - CARD LAYOUT */}
-            <div className="border-t pt-3">
-              <label className="font-bold text-[12px]">مکس میٹریل - {mixCost} روپے (اصل ریڑھی حساب) | Stock: {trolleyStocks.length}</label>
-              
-              <div className="space-y-2 mt-2">
-                {mixMaterials.map((m, idx) => (
-                  <div key={idx} className="bg-green-50 border border-green-200 rounded-xl p-2.5 space-y-2">
-                    <div className="flex gap-2">
-                      <input value={m.label} onChange={e=>updateMix(idx, "label", e.target.value)} className="flex-1 border p-2.5 rounded-xl text-[13px] font-bold bg-white" />
-                      <button onClick={()=>removeMix(idx)} className="px-3 bg-red-500 text-white rounded-xl text-[13px] font-bold">✕</button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div><label className="text-[10px] text-gray-500">ریڑھی</label><input type="number" value={m.rairi} onChange={e=>updateMix(idx, "rairi", e.target.value)} className="w-full border p-2.5 rounded-xl text-[13px] text-center bg-white" /></div>
-                      <div><label className="text-[10px] text-gray-500">ریٹ</label><input type="number" value={m.rate} onChange={e=>updateMix(idx, "rate", e.target.value)} className="w-full border p-2.5 rounded-xl text-[13px] text-center bg-white" /></div>
-                      <div><label className="text-[10px] text-gray-500">کل</label><div className="w-full bg-white border p-2.5 rounded-xl text-[13px] text-center font-bold">{m.amount}</div></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="bg-blue-50 p-3 rounded-xl border-2 border-dashed border-blue-200 mt-3 space-y-2">
-                <select value={newMixLabel} onChange={e=>{
-                  const val = e.target.value;
-                  setNewMixLabel(val);
-                  const stock = trolleyStocks.find(s => s.material === val || s.normalizedMaterial === val.toLowerCase());
-                  if (stock) setNewMixRate(Number((stock.perRairiRate ?? stock.avgRate ?? 0).toFixed(2)));
-                }} className="w-full border p-3 rounded-xl text-[13px] bg-white font-bold">
-                  <option value="">میٹریل منتخب کریں</option>
-                  {trolleyStocks.map(s => <option key={s.localId} value={s.material}>{s.material} ({s.totalRairi} ریڑھی @ {Number(s.perRairiRate ?? s.avgRate).toFixed(2)} روپے)</option>)}
-                </select>
-                <div className="grid grid-cols-3 gap-2">
-                  <input type="number" value={newMixRairi || ""} onChange={e=>setNewMixRairi(Number(e.target.value))} placeholder="ریڑھی" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center" />
-                  <input type="number" value={newMixRate || ""} onChange={e=>setNewMixRate(Number(e.target.value))} placeholder="ریٹ" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center" />
-                  <button onClick={addMix} className="w-full bg-[#0f4fb8] text-white rounded-xl font-bold text-[13px]">+ شامل</button>
-                </div>
-              </div>
-              {trolleyStocks.length === 0 && <div className="text-[11px] text-red-600 mt-2 font-bold bg-red-50 p-2 rounded-xl border">⚠️ کوئی Trolley Stock نہیں - پہلے Trolley-Stock page pe Add + Close karo (59/61)</div>}
-            </div>
-
-            <div>
-              <label className="text-[11px] font-bold text-gray-600">تعداد</label>
-              <div className="flex gap-2 mt-1"><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:Math.max(0,f.blocksCount-1)}))} className="px-5 py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">-1</button><input type="number" value={form.blocksCount} onChange={(e)=>setForm({...form,blocksCount:Number(e.target.value)})} className="flex-1 border p-3 rounded-xl text-center font-bold text-[16px]" /><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:f.blocksCount+1}))} className="px-5 py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">+1</button></div>
-            </div>
-
-            <div className="bg-[#0f4fb8]/10 p-3 rounded-xl border text-[12px] font-bold leading-7 break-words">
-              مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} | سیمنٹ: {form.cementBags} x {form.cementRate} = {cementCost} | پیٹرول: {petrolCost} | مکس: {mixCost} | کل: {totalBill}
-            </div>
-            <button onClick={()=>void handleSubmit()} disabled={saving} className="w-full bg-black text-white p-4 rounded-xl font-bold text-[14px]">{saving ? "محفوظ ہو رہا ہے..." : editingId ? `اپڈیٹ کریں` : `${form.blocksCount} بلاک محفوظ کریں`}</button>
-            {editingId && <button onClick={()=>{ setEditingId(null); setEditingLocalId(null); setForm((f)=>({...f, date: getPKDate(), blocksCount:798})); setBills([{label:"پیٹرول بل", amount:0},{label:"دوپہر کا کھانا", amount:0}]); setMixMaterials([]); }} className="w-full border p-3 rounded-xl text-[13px] font-bold">منسوخ کریں</button>}
+    <div className="min-h-screen bg-gray-50 py-2 overflow-x-hidden w-full" dir="rtl">
+      <div className="w-full max-w-[1024px] mx-auto px-2 sm:px-3 space-y-3 box-border">
+        <div className="bg-white border rounded-2xl p-3 sm:p-4 shadow-sm w-full box-border overflow-hidden">
+          <h1 className="font-bold text-[14px] sm:text-[16px] mb-3">🧱 روزانہ پیداوار - اصل ریڑھی حساب {editingId && <span className="text-orange-600 text-[10px]">(ترمیم)</span>}</h1>
+          <div className="space-y-3 w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full"><div className="w-full min-w-0"><label className="text-[11px] font-bold">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1 box-border" /></div><div className="w-full min-w-0"><label className="text-[11px] font-bold">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white box-border"><option>4 inch</option><option>5 inch</option><option>6 inch</option></select></div></div>
+            <div className="w-full min-w-0"><label className="text-[11px] font-bold">بلاک کا نام</label><select value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white box-border">{blockOptions.map((name, idx) => (<option key={`${name}-${idx}`} value={name}>{name}</option>))}</select><input type="text" placeholder="یا نیا نام لکھیں" value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-2 box-border" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full"><div className="w-full min-w-0"><label className="text-[11px] font-bold">سیمنٹ بوری</label><input type="number" value={form.cementBags} onChange={(e)=>setForm({...form,cementBags:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1 box-border" /></div><div className="w-full min-w-0"><label className="text-[11px] font-bold">بوری ریٹ</label><input type="number" value={form.cementRate} onChange={(e)=>setForm({...form,cementRate:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1 box-border" /></div><div className="w-full min-w-0"><label className="text-[11px] font-bold">فی بلاک مزدوری</label><input type="number" value={form.ratePerBlock} onChange={(e)=>setForm({...form,ratePerBlock:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-blue-50 font-bold box-border" /></div></div>
+            <div className="border-t pt-3 w-full"><label className="font-bold text-[12px]">بل / خرچہ</label><div className="space-y-2 mt-2 w-full">{bills.map((b, idx) => (<div key={idx} className="flex flex-col sm:flex-row gap-2 bg-gray-50 p-2 rounded-xl border w-full box-border"><input value={b.label} onChange={e=>updateBill(idx, "label", e.target.value)} placeholder="لیبل" className="flex-1 min-w-0 border p-3 rounded-xl text-[13px] bg-white box-border" /><div className="flex gap-2 w-full sm:w-auto"><input type="number" value={b.amount} onChange={e=>updateBill(idx, "amount", e.target.value)} placeholder="روپے" className="flex-1 min-w-0 border p-3 rounded-xl text-[13px] font-bold bg-white box-border" /><button onClick={()=>removeBill(idx)} className="shrink-0 px-4 bg-red-50 text-red-600 border rounded-xl font-bold">✕</button></div></div>))}</div><div className="flex flex-col sm:flex-row gap-2 mt-3 bg-white p-2 rounded-xl border-2 border-dashed w-full box-border"><input value={newBillLabel} onChange={e=>setNewBillLabel(e.target.value)} placeholder="نیا لیبل (ڈیزل)" className="flex-1 min-w-0 border p-3 rounded-xl text-[13px] bg-white box-border" /><div className="flex gap-2 w-full sm:w-auto"><input type="number" value={newBillAmount} onChange={e=>setNewBillAmount(Number(e.target.value))} placeholder="روپے" className="flex-1 min-w-0 border p-3 rounded-xl text-[13px] bg-white box-border" /><button onClick={addBill} className="shrink-0 px-5 bg-black text-white rounded-xl font-bold text-[13px]">+ شامل</button></div></div></div>
+            <div className="border-t pt-3 w-full"><label className="font-bold text-[12px]">مکس میٹریل - {mixCost} روپے | Stock: {trolleyStocks.length}</label><div className="space-y-2 mt-2 w-full">{mixMaterials.map((m, idx) => (<div key={idx} className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2 w-full box-border"><div className="flex gap-2 w-full"><input value={m.label} onChange={e=>updateMix(idx, "label", e.target.value)} className="flex-1 min-w-0 border p-3 rounded-xl text-[13px] font-bold bg-white box-border" /><button onClick={()=>removeMix(idx)} className="shrink-0 px-4 bg-red-500 text-white rounded-xl font-bold">✕</button></div><div className="grid grid-cols-3 gap-2 w-full"><div className="min-w-0"><label className="text-[10px]">ریڑھی</label><input type="number" value={m.rairi} onChange={e=>updateMix(idx, "rairi", e.target.value)} className="w-full border p-3 rounded-xl text-[13px] text-center bg-white box-border" /></div><div className="min-w-0"><label className="text-[10px]">ریٹ</label><input type="number" value={m.rate} onChange={e=>updateMix(idx, "rate", e.target.value)} className="w-full border p-3 rounded-xl text-[13px] text-center bg-white box-border" /></div><div className="min-w-0"><label className="text-[10px]">کل</label><div className="w-full bg-white border p-3 rounded-xl text-[13px] text-center font-bold box-border">{m.amount}</div></div></div></div>))}</div><div className="bg-blue-50 p-3 rounded-xl border-2 border-dashed border-blue-200 mt-3 space-y-2 w-full box-border"><select value={newMixLabel} onChange={e=>{ const val = e.target.value; setNewMixLabel(val); const stock = trolleyStocks.find(s => s.material === val || s.normalizedMaterial === val.toLowerCase()); if (stock) setNewMixRate(Number((stock.perRairiRate ?? stock.avgRate ?? 0).toFixed(2))); }} className="w-full border p-3 rounded-xl text-[13px] bg-white font-bold box-border"><option value="">میٹریل منتخب کریں</option>{trolleyStocks.map(s => <option key={s.localId} value={s.material}>{s.material} ({s.totalRairi} ریڑھی @ {Number(s.perRairiRate ?? s.avgRate).toFixed(2)})</option>)}</select><div className="grid grid-cols-3 gap-2 w-full"><input type="number" value={newMixRairi || ""} onChange={e=>setNewMixRairi(Number(e.target.value))} placeholder="ریڑھی" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center box-border" /><input type="number" value={newMixRate || ""} onChange={e=>setNewMixRate(Number(e.target.value))} placeholder="ریٹ" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center box-border" /><button onClick={addMix} className="w-full bg-[#0f4fb8] text-white rounded-xl font-bold text-[13px]">+ شامل</button></div></div></div>
+            <div className="w-full"><label className="text-[11px] font-bold">تعداد</label><div className="flex gap-2 mt-1 w-full"><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:Math.max(0,f.blocksCount-1)}))} className="shrink-0 w-[60px] py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">-1</button><input type="number" value={form.blocksCount} onChange={(e)=>setForm({...form,blocksCount:Number(e.target.value)})} className="flex-1 min-w-0 border p-3 rounded-xl text-center font-bold text-[16px] box-border" /><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:f.blocksCount+1}))} className="shrink-0 w-[60px] py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">+1</button></div></div>
+            <div className="bg-[#0f4fb8]/10 p-3 rounded-xl border text-[12px] font-bold leading-7 break-words w-full box-border">مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} | سیمنٹ: {form.cementBags} x {form.cementRate} = {cementCost} | مکس: {mixCost} | کل: {totalBill}</div>
+            <button onClick={()=>void handleSubmit()} disabled={saving} className="w-full bg-black text-white p-4 rounded-xl font-bold text-[14px] box-border">{saving ? "محفوظ..." : editingId ? `اپڈیٹ کریں` : `${form.blocksCount} بلاک محفوظ کریں`}</button>
           </div>
         </div>
 
-        <div className="bg-white border rounded-xl p-3 shadow-sm">
-          <div className="flex flex-col gap-2 mb-3">
-            <h2 className="font-bold text-[12px]">📋 {filtered.length} ریکارڈ | {totalBlocks} نغ | {grandTotal} روپے | مکس {grandMix} روپے</h2>
-            <div className="flex gap-2">
-              <input placeholder="تلاش کریں..." value={filter} onChange={(e)=>setFilter(e.target.value)} className="flex-1 border p-2.5 rounded-xl text-[12px]"/>
-              <button onClick={exportExcel} className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[12px] font-bold">⬇️ ایکسل</button>
-            </div>
-          </div>
+        <div className="bg-white border rounded-2xl p-3 shadow-sm w-full box-border overflow-hidden">
+          <div className="flex flex-col gap-2 mb-3 w-full"><h2 className="font-bold text-[12px] break-words">📋 {filtered.length} ریکارڈ | {totalBlocks} نغ | {grandTotal} روپے</h2><div className="flex gap-2 w-full"><input placeholder="تلاش کریں..." value={filter} onChange={(e)=>setFilter(e.target.value)} className="flex-1 min-w-0 border p-3 rounded-xl text-[12px] box-border"/><button onClick={exportExcel} className="shrink-0 px-4 py-3 bg-green-600 text-white rounded-xl text-[12px] font-bold">⬇️ ایکسل</button></div></div>
 
-          {/* DESKTOP TABLE */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border">
-            <table className="w-full text-[11px]">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-2 text-right">تاریخ</th>
-                  <th className="p-2 text-right">نام</th>
-                  <th className="p-2">تعداد</th>
-                  <th className="p-2">مکس خرچ</th>
-                  <th className="p-2 min-w-[220px] text-right">تفصیل</th>
-                  <th className="p-2">کل</th>
-                  <th className="p-2">فی بلاک</th>
-                  <th className="p-2">عمل</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r)=>(
-                  <tr key={r.localId} className="border-t align-top">
-                    <td className="p-2">{r.date}</td>
-                    <td className="p-2 font-bold">{r.blocksMade}</td>
-                    <td className="p-2 text-center font-bold">{r.blocksCount}</td>
-                    <td className="p-2 text-center font-bold text-blue-600">{r.mixCost||0}</td>
-                    <td className="p-2 text-[10px] max-w-[260px]">
-                      <div className="flex flex-col gap-1">
-                        {(r.mixMaterials||[]).map((m, i) => (
-                          <div key={`${r.localId}-${i}`} className="leading-[12px] bg-gray-50 border border-dashed rounded px-2 py-1">
-                            <div className="font-bold">{m.label}</div>
-                            <div>{m.rairi} ریڑھی x {m.rate} = <b className="text-blue-600">{m.amount} روپے</b></div>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-2 font-bold">{r.totalBill||r.dailyWages}</td>
-                    <td className="p-2 font-bold">{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</td>
-                    <td className="p-2"><div className="flex gap-1"><button onClick={()=>handleEdit(r)} className="px-2 py-1 bg-blue-600 text-white rounded text-[10px]">ترمیم</button><button onClick={()=>void handleDelete(r)} className="px-2 py-1 bg-red-600 text-white rounded text-[10px]">حذف</button></div></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* DESKTOP */}
+          <div className="hidden md:block overflow-x-auto rounded-xl border w-full"><table className="w-full text-[11px]"><thead className="bg-gray-100"><tr><th className="p-2 text-right">تاریخ</th><th className="p-2 text-right">نام</th><th className="p-2">تعداد</th><th className="p-2">سیمنٹ</th><th className="p-2">بلز</th><th className="p-2">مکس</th><th className="p-2">کل</th><th className="p-2">فی بلاک</th><th className="p-2">عمل</th></tr></thead><tbody>{filtered.map((r)=>(<tr key={r.localId} className="border-t"><td className="p-2">{r.date}</td><td className="p-2 font-bold">{r.blocksMade}</td><td className="p-2 text-center">{r.blocksCount}</td><td className="p-2 text-center">{r.cementBags} x {r.cementRate||1400} = {r.cementCost||0}</td><td className="p-2 text-[10px]">{(r.bills||[]).map(b=>`${b.label}:${b.amount}`).join(" | ")}</td><td className="p-2 text-[10px]">{(r.mixMaterials||[]).map(m=>`${m.label}:${m.rairi}x${m.rate}=${m.amount}`).join(" | ")}</td><td className="p-2 font-bold">{r.totalBill}</td><td className="p-2 font-bold">{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</td><td className="p-2"><div className="flex gap-1"><button onClick={()=>handleEdit(r)} className="px-2 py-1 bg-blue-600 text-white rounded">ترمیم</button><button onClick={()=>void handleDelete(r)} className="px-2 py-1 bg-red-600 text-white rounded">حذف</button></div></td></tr>))}</tbody></table></div>
 
-          {/* MOBILE CARDS - NEW */}
-          <div className="sm:hidden space-y-3">
+          {/* MOBILE - FULL BREAKDOWN */}
+          <div className="md:hidden space-y-3 w-full">
             {filtered.map((r)=>(
-              <div key={r.localId} className="border rounded-xl p-3 bg-gray-50 space-y-2">
-                <div className="flex justify-between items-center">
-                  <div className="font-bold text-[13px]">{r.blocksMade} - {r.blocksCount} نغ</div>
-                  <div className="text-[10px] bg-white border px-2 py-1 rounded-lg">{r.date}</div>
+              <div key={r.localId} className="border-2 rounded-2xl p-3 bg-white space-y-2.5 w-full box-border overflow-hidden">
+                <div className="flex justify-between items-start gap-2 w-full"><div className="font-bold text-[14px] flex-1 min-w-0 break-words">{r.blocksMade} - {r.blocksCount} نغ</div><div className="shrink-0 text-[10px] bg-gray-100 border px-2.5 py-1 rounded-full">{r.date}</div></div>
+                <div className="grid grid-cols-3 gap-2 w-full"><div className="bg-gray-50 border rounded-xl p-2.5 text-center min-w-0"><div className="text-gray-500 text-[9px]">کل بل</div><b className="text-[12px]">{r.totalBill}</b></div><div className="bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-center min-w-0"><div className="text-gray-500 text-[9px]">مکس</div><b className="text-blue-600 text-[12px]">{r.mixCost||0}</b></div><div className="bg-green-50 border rounded-xl p-2.5 text-center min-w-0"><div className="text-gray-500 text-[9px]">فی بلاک</div><b className="text-[12px]">{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</b></div></div>
+                
+                {/* ✅ NEW: Cement + Labour + All Bills */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-1.5 text-[11px] w-full box-border">
+                  <div className="flex justify-between gap-2"><span className="shrink-0">سیمنٹ:</span><b className="text-left break-words">{r.cementBags} بوری x {r.cementRate||1400} Rs = {r.cementCost||r.cementBags*(r.cementRate||1400)} Rs</b></div>
+                  <div className="flex justify-between gap-2"><span className="shrink-0">مزدوری:</span><b>{r.blocksCount} x {r.ratePerBlock} = {r.dailyWages} Rs</b></div>
+                  <div className="border-t border-dashed pt-2 mt-2 space-y-1">
+                    <div className="font-bold text-[10px]">تمام بلز (ریٹ سمیت):</div>
+                    {(r.bills||[]).length>0 ? (r.bills||[]).map((b,i)=>(<div key={i} className="flex justify-between gap-2"><span className="flex-1 min-w-0 break-words">{b.label}</span><b className="shrink-0">{b.amount} Rs</b></div>)) : <span className="text-gray-400">کوئی بل نہیں</span>}
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-[11px]">
-                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">کل بل</div><b>{r.totalBill}</b></div>
-                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">مکس</div><b className="text-blue-600">{r.mixCost||0}</b></div>
-                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">فی بلاک</div><b>{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</b></div>
-                </div>
-                <div className="space-y-1">
-                  {(r.mixMaterials||[]).map((m,i)=>(
-                    <div key={i} className="text-[11px] bg-white border border-dashed rounded-lg p-2 flex justify-between">
-                      <span className="font-bold">{m.label} - {m.rairi} ریڑھی</span>
-                      <span className="text-blue-600 font-bold">{m.amount} Rs</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={()=>handleEdit(r)} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-[12px] font-bold">ترمیم</button>
-                  <button onClick={()=>void handleDelete(r)} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-[12px] font-bold">حذف</button>
-                </div>
+
+                <div className="space-y-1.5 w-full"><div className="font-bold text-[11px]">مکس تفصیل (اصل ریڑھی):</div>{(r.mixMaterials||[]).length>0 ? (r.mixMaterials||[]).map((m,i)=>(<div key={i} className="bg-gray-50 border-2 border-dashed rounded-xl p-2.5 flex justify-between items-center gap-2 w-full box-border"><div className="flex-1 min-w-0"><div className="font-bold text-[12px] break-words">{m.label}</div><div className="text-[11px] text-gray-600">{m.rairi} ریڑھی x {m.rate} Rs = {m.amount} Rs</div></div><div className="shrink-0 font-bold text-blue-600 text-[13px]">{m.amount}</div></div>)) : <div className="text-[11px] text-gray-400 bg-gray-50 p-2 rounded-xl border text-center">مکس 0</div>}</div>
+                <div className="flex gap-2 w-full"><button onClick={()=>handleEdit(r)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[13px] font-bold">ترمیم</button><button onClick={()=>void handleDelete(r)} className="flex-1 py-3 bg-red-600 text-white rounded-xl text-[13px] font-bold">حذف</button></div>
               </div>
             ))}
+            {filtered.length===0 && <div className="text-center py-8 text-gray-400 text-[12px]">کوئی ریکارڈ نہیں</div>}
           </div>
-
         </div>
       </div>
     </div>
