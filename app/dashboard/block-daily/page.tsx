@@ -376,87 +376,117 @@ export default function BlockDailyPage() {
   const totalBlocks = filtered.reduce((s,r)=>s+r.blocksCount,0);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-1 sm:py-3" dir="rtl">
-      <div className="max-w-[1024px] mx-auto px-1.5 sm:px-3 space-y-2 sm:space-y-3">
-        <div className="bg-white border rounded-xl sm:rounded-2xl p-2 sm:p-4 shadow-sm">
-          <h1 className="font-bold text-[12px] sm:text-[15px] mb-2">🧱 روزانہ پیداوار - اصل ریڑھی حساب {editingId && <span className="text-orange-600 text-[9px]">(ترمیم)</span>}</h1>
-          <div className="space-y-2 sm:space-y-3">
-            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-white"><option>4 inch</option><option>5 inch</option><option>6 inch</option></select></div>
+    <div className="min-h-screen bg-gray-50 py-1 sm:py-3 overflow-x-hidden" dir="rtl">
+      <div className="max-w-[1024px] mx-auto px-2 sm:px-3 space-y-2 sm:space-y-3">
+        <div className="bg-white border rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-sm">
+          <h1 className="font-bold text-[13px] sm:text-[15px] mb-3">🧱 روزانہ پیداوار - اصل ریڑھی حساب {editingId && <span className="text-orange-600 text-[10px]">(ترمیم)</span>}</h1>
+          <div className="space-y-3">
+            {/* تاریخ + سائز - mobile pe stack */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div><label className="text-[11px] font-bold text-gray-600">تاریخ</label><input type="date" value={form.date} onChange={(e)=>setForm({...form,date:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
+              <div><label className="text-[11px] font-bold text-gray-600">سائز</label><select value={form.blockType} onChange={(e)=>setForm({...form,blockType:e.target.value as BlockTypeOption})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white"><option>4 inch</option><option>5 inch</option><option>6 inch</option></select></div>
             </div>
+
             <div>
-              <label className="text-[9px] sm:text-[10px] font-bold text-gray-600">بلاک کا نام</label>
-              <select value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-white">{blockOptions.map((name, idx) => (<option key={`${name}-${idx}`} value={name}>{name}</option>))}</select>
-              <input type="text" placeholder="یا نیا نام لکھیں" value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-1.5" />
+              <label className="text-[11px] font-bold text-gray-600">بلاک کا نام</label>
+              <select value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-white">{blockOptions.map((name, idx) => (<option key={`${name}-${idx}`} value={name}>{name}</option>))}</select>
+              <input type="text" placeholder="یا نیا نام لکھیں" value={form.blocksMade} onChange={(e)=>setForm({...form,blocksMade:e.target.value})} className="w-full border p-3 rounded-xl text-[13px] mt-2" />
             </div>
-            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">سیمنٹ بوری</label><input type="number" value={form.cementBags} onChange={(e)=>setForm({...form,cementBags:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">بوری ریٹ</label><input type="number" value={form.cementRate} onChange={(e)=>setForm({...form,cementRate:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5" /></div>
-              <div><label className="text-[9px] sm:text-[10px] font-bold text-gray-600">فی بلاک مزدوری</label><input type="number" value={form.ratePerBlock} onChange={(e)=>setForm({...form,ratePerBlock:Number(e.target.value)})} className="w-full border p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-[11px] sm:text-[12px] mt-0.5 bg-blue-50 font-bold" /></div>
+
+            {/* سیمنٹ - mobile pe 1 col */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div><label className="text-[11px] font-bold text-gray-600">سیمنٹ بوری</label><input type="number" value={form.cementBags} onChange={(e)=>setForm({...form,cementBags:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
+              <div><label className="text-[11px] font-bold text-gray-600">بوری ریٹ</label><input type="number" value={form.cementRate} onChange={(e)=>setForm({...form,cementRate:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1" /></div>
+              <div><label className="text-[11px] font-bold text-gray-600">فی بلاک مزدوری</label><input type="number" value={form.ratePerBlock} onChange={(e)=>setForm({...form,ratePerBlock:Number(e.target.value)})} className="w-full border p-3 rounded-xl text-[13px] mt-1 bg-blue-50 font-bold" /></div>
             </div>
-            <div className="border-t pt-2">
-              <label className="font-bold text-[10px] sm:text-[11px]">بل / خرچہ - پیٹرول بل</label>
-              {displayBills.map((b, idx) => (
-                <div key={idx} className="flex gap-1 mt-1.5">
-                  <input value={b.label} onChange={e=>updateBill(idx, "label", e.target.value)} placeholder="لیبل" className="flex-1 border p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px]" />
-                  <input type="number" value={b.amount} onChange={e=>updateBill(idx, "amount", e.target.value)} placeholder="روپے" className="w-[70px] sm:w-[85px] border p-1.5 sm:p-2 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold" />
-                  <button onClick={()=>removeBill(idx)} className="px-2 bg-red-50 text-red-600 border border-red-200 rounded-lg sm:rounded-xl text-[10px]">✕</button>
+
+            {/* بل / خرچہ - FIXED for mobile */}
+            <div className="border-t pt-3">
+              <label className="font-bold text-[12px]">بل / خرچہ - پیٹرول بل</label>
+              <div className="space-y-2 mt-2">
+                {displayBills.map((b, idx) => (
+                  <div key={idx} className="flex flex-col sm:flex-row gap-2 bg-gray-50 p-2 rounded-xl border">
+                    <input value={b.label} onChange={e=>updateBill(idx, "label", e.target.value)} placeholder="لیبل (پیٹرول بل)" className="flex-1 border p-3 rounded-xl text-[13px] bg-white" />
+                    <div className="flex gap-2">
+                      <input type="number" value={b.amount} onChange={e=>updateBill(idx, "amount", e.target.value)} placeholder="روپے" className="flex-1 sm:w-[100px] border p-3 rounded-xl text-[13px] font-bold bg-white" />
+                      <button onClick={()=>removeBill(idx)} className="px-4 bg-red-50 text-red-600 border border-red-200 rounded-xl text-[14px] font-bold">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2 mt-3 bg-white p-2 rounded-xl border-2 border-dashed">
+                <input value={newBillLabel} onChange={e=>setNewBillLabel(e.target.value)} placeholder="نیا لیبل (مثلا ڈیزل)" className="flex-1 border p-3 rounded-xl text-[13px] bg-white" />
+                <div className="flex gap-2">
+                  <input type="number" value={newBillAmount} onChange={e=>setNewBillAmount(Number(e.target.value))} placeholder="روپے" className="flex-1 sm:w-[90px] border p-3 rounded-xl text-[13px] bg-white" />
+                  <button onClick={addBill} className="px-5 bg-black text-white rounded-xl font-bold text-[13px]">+ شامل</button>
                 </div>
-              ))}
-              <div className="flex gap-1 mt-1.5 bg-gray-50 p-1.5 rounded-lg sm:rounded-xl border border-dashed">
-                <input value={newBillLabel} onChange={e=>setNewBillLabel(e.target.value)} placeholder="نیا لیبل (مثلا ڈیزل)" className="flex-1 border p-1.5 rounded-lg text-[10px] bg-white" />
-                <input type="number" value={newBillAmount} onChange={e=>setNewBillAmount(Number(e.target.value))} placeholder="روپے" className="w-[60px] border p-1.5 rounded-lg text-[10px] bg-white" />
-                <button onClick={addBill} className="px-2.5 bg-black text-white rounded-lg font-bold text-[10px]">+ شامل</button>
               </div>
             </div>
-            <div className="border-t pt-2">
-              <label className="font-bold text-[10px] sm:text-[11px]">مکس میٹریل - {mixCost} روپے (اصل ریڑھی حساب) | Stock: {trolleyStocks.length}</label>
-              {mixMaterials.map((m, idx) => (
-                <div key={idx} className="flex gap-1 mt-1.5">
-                  <input value={m.label} onChange={e=>updateMix(idx, "label", e.target.value)} placeholder="میٹریل" className="flex-1 border p-1.5 rounded-lg text-[10px] sm:text-[11px]" />
-                  <input type="number" value={m.rairi} onChange={e=>updateMix(idx, "rairi", e.target.value)} placeholder="ریڑھی" className="w-[50px] border p-1.5 rounded-lg text-[10px]" />
-                  <input type="number" value={m.rate} onChange={e=>updateMix(idx, "rate", e.target.value)} placeholder="ریٹ" className="w-[60px] border p-1.5 rounded-lg text-[10px]" />
-                  <span className="w-[60px] bg-gray-100 border p-1.5 rounded-lg text-[10px] text-center font-bold">{m.amount} روپے</span>
-                  <button onClick={()=>removeMix(idx)} className="px-2 bg-red-50 text-red-600 border rounded-lg text-[10px]">✕</button>
-                </div>
-              ))}
-              <div className="flex gap-1 mt-1.5 bg-blue-50 p-1.5 rounded-lg border border-dashed border-blue-200">
+
+            {/* مکس میٹریل - FIXED for mobile - CARD LAYOUT */}
+            <div className="border-t pt-3">
+              <label className="font-bold text-[12px]">مکس میٹریل - {mixCost} روپے (اصل ریڑھی حساب) | Stock: {trolleyStocks.length}</label>
+              
+              <div className="space-y-2 mt-2">
+                {mixMaterials.map((m, idx) => (
+                  <div key={idx} className="bg-green-50 border border-green-200 rounded-xl p-2.5 space-y-2">
+                    <div className="flex gap-2">
+                      <input value={m.label} onChange={e=>updateMix(idx, "label", e.target.value)} className="flex-1 border p-2.5 rounded-xl text-[13px] font-bold bg-white" />
+                      <button onClick={()=>removeMix(idx)} className="px-3 bg-red-500 text-white rounded-xl text-[13px] font-bold">✕</button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><label className="text-[10px] text-gray-500">ریڑھی</label><input type="number" value={m.rairi} onChange={e=>updateMix(idx, "rairi", e.target.value)} className="w-full border p-2.5 rounded-xl text-[13px] text-center bg-white" /></div>
+                      <div><label className="text-[10px] text-gray-500">ریٹ</label><input type="number" value={m.rate} onChange={e=>updateMix(idx, "rate", e.target.value)} className="w-full border p-2.5 rounded-xl text-[13px] text-center bg-white" /></div>
+                      <div><label className="text-[10px] text-gray-500">کل</label><div className="w-full bg-white border p-2.5 rounded-xl text-[13px] text-center font-bold">{m.amount}</div></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-blue-50 p-3 rounded-xl border-2 border-dashed border-blue-200 mt-3 space-y-2">
                 <select value={newMixLabel} onChange={e=>{
                   const val = e.target.value;
                   setNewMixLabel(val);
                   const stock = trolleyStocks.find(s => s.material === val || s.normalizedMaterial === val.toLowerCase());
                   if (stock) setNewMixRate(Number((stock.perRairiRate ?? stock.avgRate ?? 0).toFixed(2)));
-                }} className="flex-1 border p-1.5 rounded-lg text-[10px] bg-white">
+                }} className="w-full border p-3 rounded-xl text-[13px] bg-white font-bold">
                   <option value="">میٹریل منتخب کریں</option>
                   {trolleyStocks.map(s => <option key={s.localId} value={s.material}>{s.material} ({s.totalRairi} ریڑھی @ {Number(s.perRairiRate ?? s.avgRate).toFixed(2)} روپے)</option>)}
                 </select>
-                <input type="number" value={newMixRairi || ""} onChange={e=>setNewMixRairi(Number(e.target.value))} placeholder="ریڑھی" className="w-[50px] border p-1.5 rounded-lg text-[10px] bg-white" />
-                <input type="number" value={newMixRate || ""} onChange={e=>setNewMixRate(Number(e.target.value))} placeholder="ریٹ" className="w-[60px] border p-1.5 rounded-lg text-[10px] bg-white" />
-                <button onClick={addMix} className="px-2.5 bg-[#0f4fb8] text-white rounded-lg font-bold text-[10px]">+ شامل</button>
+                <div className="grid grid-cols-3 gap-2">
+                  <input type="number" value={newMixRairi || ""} onChange={e=>setNewMixRairi(Number(e.target.value))} placeholder="ریڑھی" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center" />
+                  <input type="number" value={newMixRate || ""} onChange={e=>setNewMixRate(Number(e.target.value))} placeholder="ریٹ" className="w-full border p-3 rounded-xl text-[13px] bg-white text-center" />
+                  <button onClick={addMix} className="w-full bg-[#0f4fb8] text-white rounded-xl font-bold text-[13px]">+ شامل</button>
+                </div>
               </div>
-              {trolleyStocks.length === 0 && <div className="text-[10px] text-red-600 mt-1 font-bold">⚠️ کوئی Trolley Stock نہیں - پہلے Trolley-Stock page pe Add + Close karo (59/61)</div>}
+              {trolleyStocks.length === 0 && <div className="text-[11px] text-red-600 mt-2 font-bold bg-red-50 p-2 rounded-xl border">⚠️ کوئی Trolley Stock نہیں - پہلے Trolley-Stock page pe Add + Close karo (59/61)</div>}
             </div>
+
             <div>
-              <label className="text-[9px] sm:text-[10px] font-bold text-gray-600">تعداد</label>
-              <div className="flex gap-1.5 mt-0.5"><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:Math.max(0,f.blocksCount-1)}))} className="px-3 py-1.5 border rounded-lg font-bold bg-gray-100 text-[11px]">-1</button><input type="number" value={form.blocksCount} onChange={(e)=>setForm({...form,blocksCount:Number(e.target.value)})} className="flex-1 border p-1.5 rounded-lg text-center font-bold text-[12px] sm:text-[13px]" /><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:f.blocksCount+1}))} className="px-3 py-1.5 border rounded-lg font-bold bg-gray-100 text-[11px]">+1</button></div>
+              <label className="text-[11px] font-bold text-gray-600">تعداد</label>
+              <div className="flex gap-2 mt-1"><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:Math.max(0,f.blocksCount-1)}))} className="px-5 py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">-1</button><input type="number" value={form.blocksCount} onChange={(e)=>setForm({...form,blocksCount:Number(e.target.value)})} className="flex-1 border p-3 rounded-xl text-center font-bold text-[16px]" /><button type="button" onClick={()=>setForm((f)=>({...f,blocksCount:f.blocksCount+1}))} className="px-5 py-3 border rounded-xl font-bold bg-gray-100 text-[15px]">+1</button></div>
             </div>
-            <div className="bg-[#0f4fb8]/10 p-2 rounded-lg border text-[10px] sm:text-[11px] font-bold leading-6">
-              مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} روپے | سیمنٹ: {form.cementBags} x {form.cementRate} = {cementCost} روپے | پیٹرول: {petrolCost} روپے | مکس: {mixCost} روپے | کل بل: {totalBill} روپے
+
+            <div className="bg-[#0f4fb8]/10 p-3 rounded-xl border text-[12px] font-bold leading-7 break-words">
+              مزدوری: {form.blocksCount} x {form.ratePerBlock} = {wages} | سیمنٹ: {form.cementBags} x {form.cementRate} = {cementCost} | پیٹرول: {petrolCost} | مکس: {mixCost} | کل: {totalBill}
             </div>
-            <button onClick={()=>void handleSubmit()} disabled={saving} className="w-full bg-black text-white p-2.5 sm:p-3 rounded-xl font-bold text-[11px] sm:text-[12px]">{saving ? "محفوظ ہو رہا ہے..." : editingId ? `اپڈیٹ کریں` : `${form.blocksCount} بلاک محفوظ کریں`}</button>
-            {editingId && <button onClick={()=>{ setEditingId(null); setEditingLocalId(null); setForm((f)=>({...f, date: getPKDate(), blocksCount:798})); setBills([{label:"پیٹرول بل", amount:0},{label:"دوپہر کا کھانا", amount:0}]); setMixMaterials([]); }} className="w-full border p-2 rounded-xl text-[10px] font-bold">منسوخ کریں</button>}
+            <button onClick={()=>void handleSubmit()} disabled={saving} className="w-full bg-black text-white p-4 rounded-xl font-bold text-[14px]">{saving ? "محفوظ ہو رہا ہے..." : editingId ? `اپڈیٹ کریں` : `${form.blocksCount} بلاک محفوظ کریں`}</button>
+            {editingId && <button onClick={()=>{ setEditingId(null); setEditingLocalId(null); setForm((f)=>({...f, date: getPKDate(), blocksCount:798})); setBills([{label:"پیٹرول بل", amount:0},{label:"دوپہر کا کھانا", amount:0}]); setMixMaterials([]); }} className="w-full border p-3 rounded-xl text-[13px] font-bold">منسوخ کریں</button>}
           </div>
         </div>
 
-        <div className="bg-white border rounded-xl sm:rounded-2xl p-1.5 sm:p-3 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 mb-2">
-            <h2 className="font-bold text-[10px] sm:text-[12px] flex-1">📋 {filtered.length} ریکارڈ | {totalBlocks} نغ | {grandTotal} روپے | مکس {grandMix} روپے</h2>
-            <button onClick={exportExcel} className="px-2.5 py-1.5 bg-green-600 text-white rounded-lg text-[9px] sm:text-[11px] font-bold self-start sm:self-auto">⬇️ ایکسل</button>
+        <div className="bg-white border rounded-xl p-3 shadow-sm">
+          <div className="flex flex-col gap-2 mb-3">
+            <h2 className="font-bold text-[12px]">📋 {filtered.length} ریکارڈ | {totalBlocks} نغ | {grandTotal} روپے | مکس {grandMix} روپے</h2>
+            <div className="flex gap-2">
+              <input placeholder="تلاش کریں..." value={filter} onChange={(e)=>setFilter(e.target.value)} className="flex-1 border p-2.5 rounded-xl text-[12px]"/>
+              <button onClick={exportExcel} className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[12px] font-bold">⬇️ ایکسل</button>
+            </div>
           </div>
-          <input placeholder="تلاش کریں..." value={filter} onChange={(e)=>setFilter(e.target.value)} className="w-full border p-1.5 sm:p-2 rounded-lg text-[10px] sm:text-[11px] mb-2"/>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-[9px] sm:text-[10px]">
+
+          {/* DESKTOP TABLE */}
+          <div className="hidden sm:block overflow-x-auto rounded-xl border">
+            <table className="w-full text-[11px]">
               <thead className="bg-gray-100">
                 <tr>
                   <th className="p-2 text-right">تاریخ</th>
@@ -472,34 +502,58 @@ export default function BlockDailyPage() {
               <tbody>
                 {filtered.map((r)=>(
                   <tr key={r.localId} className="border-t align-top">
-                    <td className="p-1.5">{r.date}</td>
-                    <td className="p-1.5 font-bold">{r.blocksMade}</td>
-                    <td className="p-1.5 text-center font-bold">{r.blocksCount}</td>
-                    <td className="p-1.5 text-center font-bold text-blue-600">{r.mixCost||0}</td>
-                    <td className="p-1.5 text-[8px] max-w-[260px]">
+                    <td className="p-2">{r.date}</td>
+                    <td className="p-2 font-bold">{r.blocksMade}</td>
+                    <td className="p-2 text-center font-bold">{r.blocksCount}</td>
+                    <td className="p-2 text-center font-bold text-blue-600">{r.mixCost||0}</td>
+                    <td className="p-2 text-[10px] max-w-[260px]">
                       <div className="flex flex-col gap-1">
                         {(r.mixMaterials||[]).map((m, i) => (
-                          <div key={`${r.localId}-${i}`} className="leading-[11px] bg-gray-50 border border-dashed rounded px-1.5 py-1">
-                            <div className="font-bold text-[9px]">{m.label}</div>
+                          <div key={`${r.localId}-${i}`} className="leading-[12px] bg-gray-50 border border-dashed rounded px-2 py-1">
+                            <div className="font-bold">{m.label}</div>
                             <div>{m.rairi} ریڑھی x {m.rate} = <b className="text-blue-600">{m.amount} روپے</b></div>
                           </div>
                         ))}
-                        {(!r.mixMaterials || r.mixMaterials.length===0) && <span className="text-gray-400">-</span>}
                       </div>
                     </td>
-                    <td className="p-1.5 font-bold">{r.totalBill||r.dailyWages}</td>
-                    <td className="p-1.5 font-bold">{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</td>
-                    <td className="p-1.5">
-                      <div className="flex gap-1">
-                        <button onClick={()=>handleEdit(r)} className="px-2 py-1 bg-blue-600 text-white rounded text-[8px]">ترمیم</button>
-                        <button onClick={()=>void handleDelete(r)} className="px-2 py-1 bg-red-600 text-white rounded text-[8px]">حذف</button>
-                      </div>
-                    </td>
+                    <td className="p-2 font-bold">{r.totalBill||r.dailyWages}</td>
+                    <td className="p-2 font-bold">{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</td>
+                    <td className="p-2"><div className="flex gap-1"><button onClick={()=>handleEdit(r)} className="px-2 py-1 bg-blue-600 text-white rounded text-[10px]">ترمیم</button><button onClick={()=>void handleDelete(r)} className="px-2 py-1 bg-red-600 text-white rounded text-[10px]">حذف</button></div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {/* MOBILE CARDS - NEW */}
+          <div className="sm:hidden space-y-3">
+            {filtered.map((r)=>(
+              <div key={r.localId} className="border rounded-xl p-3 bg-gray-50 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="font-bold text-[13px]">{r.blocksMade} - {r.blocksCount} نغ</div>
+                  <div className="text-[10px] bg-white border px-2 py-1 rounded-lg">{r.date}</div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">کل بل</div><b>{r.totalBill}</b></div>
+                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">مکس</div><b className="text-blue-600">{r.mixCost||0}</b></div>
+                  <div className="bg-white border rounded-lg p-2 text-center"><div className="text-gray-500 text-[9px]">فی بلاک</div><b>{r.costPerBlock ? Number(r.costPerBlock).toFixed(2) : "0"}</b></div>
+                </div>
+                <div className="space-y-1">
+                  {(r.mixMaterials||[]).map((m,i)=>(
+                    <div key={i} className="text-[11px] bg-white border border-dashed rounded-lg p-2 flex justify-between">
+                      <span className="font-bold">{m.label} - {m.rairi} ریڑھی</span>
+                      <span className="text-blue-600 font-bold">{m.amount} Rs</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>handleEdit(r)} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-[12px] font-bold">ترمیم</button>
+                  <button onClick={()=>void handleDelete(r)} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-[12px] font-bold">حذف</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
         </div>
       </div>
     </div>
