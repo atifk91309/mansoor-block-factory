@@ -128,6 +128,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
   if (body.actualRairi !== undefined) {
     const actual = rnd(body.actualRairi);
+    if (actual <= 0) return NextResponse.json({error:"Actual 0 nahi ho sakta"}, {status:400});
     entryDoc.actualRairi = actual;
     entryDoc.rairiInTrolley = actual;
     // ✅ ASAL RATE - price / asal

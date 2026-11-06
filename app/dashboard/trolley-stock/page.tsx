@@ -27,6 +27,7 @@ type EntryDisplay = OfflineTrolleyEntry & {
   date: string;
   status: string;
   material: string;
+  _id?: string;
 };
 
 function getRairiValue(en: EntryDisplay): number {
@@ -144,62 +145,111 @@ export default function TrolleyStockPage() {
     }
   }
 
-  async function handleClose(localId: string): Promise<void> {
-  if (actualRairi <= 0) { alert("اصل ریڑھی لکھیں"); return; }
-  const userId = await getUserId();
-  const res = await fetch(`${API_BASE}/close`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ localId, actualRairi, actualQty: rnd(actualRairi), userId }),
-  });
-  if (res.ok) {
-    const j = await res.json().catch(()=>null) as { stock?: { totalRairi: number; totalCost: number; avgRate: number } } | null;
-    const entry = entries.find((en) => en.localId === localId);
-    if (entry) {
-      const newRate = Number((entry.trolleyPrice / actualRairi).toFixed(2));
-      // ✅ rairiInTrolley hata diya - type me nahi hai
-      const updateFields: Partial<OfflineTrolleyEntry> = {
-        totalRairi: rnd(actualRairi),
-        actualRairi: rnd(actualRairi),
-        rairiPerTrolley: rnd(actualRairi),
-        status: "CLOSED",
-        perRairiRate: newRate,
-      };
-      await offlineDB.trolleyEntries.update(localId, updateFields);
-
-      const normalized = entry.material.trim().toLowerCase();
-      const stockRow = await offlineDB.trolleyStock.where("normalizedMaterial").equals(normalized).first();
-      if (stockRow) {
-        const allForMat = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(normalized).toArray() as EntryDisplay[];
-        let tR = 0; let tC = 0;
-        for (const e of allForMat) {
-          if (e.localId === localId) {
-            tR += rnd(actualRairi);
-            tC += rnd(actualRairi) * newRate;
-          } else {
-            const eff = e.actualRairi ?? e.rairiPerTrolley ?? FROZEN_RAIRI;
-            const rem = Math.max(0, eff - (e.totalUsed ?? 0));
-            if (rem <= 0) continue;
-            tR += rem;
-            tC += rem * (e.perRairiRate ?? 0);
-          }
-        }
-        const avg = tR > 0 ? Number((tC / tR).toFixed(2)) : 0;
-        await offlineDB.trolleyStock.update(stockRow.localId, {
-          totalRairi: tR,
-          totalCost: Math.round(tC),
-          avgRate: avg,
-          perRairiRate: avg,
-        });
-      }
+  // ✅ NEW: DELETE
+  async function handleDelete(en: EntryDisplay): Promise<void> {
+    if ((en.totalUsed ?? 0) > 0) {
+      alert(`Cannot delete - ${en.totalUsed} Rairi daily me use ho chuki hai. Pehle daily delete karo.`);
+      return;
     }
-    setCloseLocalId(null); setActualRairi(0); 
+    if (!confirm(`${en.material} ${en.trolleyPrice} wala OPEN stock delete karna hai?`)) return;
+    
+    // Offline delete
+    await offlineDB.trolleyEntries.delete(en.localId).catch(()=>{});
+    
+    // Server delete
+    try {
+      const id = en._id || en.localId;
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) {
+        alert(data.error || "Delete failed");
+        await load();
+        return;
+      }
+    } catch {}
     await load();
-  } else {
-    const txt = await res.text();
-    alert(txt);
   }
-}
+
+  // ✅ NEW: EDIT
+  async function handleEdit(en: EntryDisplay): Promise<void> {
+    const newPriceStr = prompt(`Nayi Qeemat likho (Purani: ${en.trolleyPrice}):`, String(en.trolleyPrice));
+    if (!newPriceStr) return;
+    const newPrice = Number(newPriceStr);
+    if (newPrice <= 0) { alert("Qeemat sahi likho"); return; }
+
+    // Offline update
+    const newRate = Number((newPrice / FROZEN_RAIRI).toFixed(2));
+    await offlineDB.trolleyEntries.update(en.localId, { 
+      trolleyPrice: rnd(newPrice), 
+      perRairiRate: newRate 
+    }).catch(()=>{});
+
+    // Server update
+    try {
+      const id = en._id || en.localId;
+      await fetch(`${API_BASE}/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trolleyPrice: rnd(newPrice) })
+      });
+    } catch {}
+    await load();
+  }
+
+  async function handleClose(localId: string): Promise<void> {
+    if (actualRairi <= 0) { alert("اصل ریڑھی لکھیں"); return; }
+    const userId = await getUserId();
+    const res = await fetch(`${API_BASE}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localId, actualRairi, actualQty: rnd(actualRairi), userId }),
+    });
+    if (res.ok) {
+      const entry = entries.find((en) => en.localId === localId);
+      if (entry) {
+        const newRate = Number((entry.trolleyPrice / actualRairi).toFixed(2));
+        const updateFields: Partial<OfflineTrolleyEntry> = {
+          totalRairi: rnd(actualRairi),
+          actualRairi: rnd(actualRairi),
+          rairiPerTrolley: rnd(actualRairi),
+          status: "CLOSED",
+          perRairiRate: newRate,
+        };
+        await offlineDB.trolleyEntries.update(localId, updateFields);
+
+        const normalized = entry.material.trim().toLowerCase();
+        const stockRow = await offlineDB.trolleyStock.where("normalizedMaterial").equals(normalized).first();
+        if (stockRow) {
+          const allForMat = await offlineDB.trolleyEntries.where("normalizedMaterial").equals(normalized).toArray() as EntryDisplay[];
+          let tR = 0; let tC = 0;
+          for (const e of allForMat) {
+            if (e.localId === localId) {
+              tR += rnd(actualRairi);
+              tC += rnd(actualRairi) * newRate;
+            } else {
+              const eff = e.actualRairi ?? e.rairiPerTrolley ?? FROZEN_RAIRI;
+              const rem = Math.max(0, eff - (e.totalUsed ?? 0));
+              if (rem <= 0) continue;
+              tR += rem;
+              tC += rem * (e.perRairiRate ?? 0);
+            }
+          }
+          const avg = tR > 0 ? Number((tC / tR).toFixed(2)) : 0;
+          await offlineDB.trolleyStock.update(stockRow.localId, {
+            totalRairi: tR,
+            totalCost: Math.round(tC),
+            avgRate: avg,
+            perRairiRate: avg,
+          });
+        }
+      }
+      setCloseLocalId(null); setActualRairi(0); 
+      await load();
+    } else {
+      const txt = await res.text();
+      alert(txt);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-3" dir="rtl">
@@ -225,7 +275,23 @@ export default function TrolleyStockPage() {
           <button onClick={() => void handleAdd()} disabled={saving} className="w-full bg-black text-white p-4 rounded-xl font-bold mt-4">{saving ? "محفوظ..." : `شامل کریں ${material} ${FROZEN_RAIRI} ریڑھی @ ${estimatedRate} روپے`}</button>
         </div>
         <div className="bg-white border rounded-2xl p-4 shadow-sm"><h2 className="font-bold text-[13px] mb-3">📦 اسٹاک - {stocks.length}</h2>{stocks.length===0 ? <div className="text-[11px] text-gray-400 py-4 text-center">کوئی اسٹاک نہیں</div> : stocks.map((s) => (<div key={s.localId} className="border rounded-xl p-3 bg-gray-50 mb-2"><div className="font-bold text-[13px]">{s.material}</div><div className="text-[11px]">کل: <b>{s.totalRairi} ریڑھی</b> | لاگت: <b>{s.totalCost}</b> | اوسط: <b>{Number(s.perRairiRate || s.avgRate).toFixed(2)} Rs</b> {Number(s.perRairiRate || s.avgRate) > 300 ? "🔥 اصل" : ""}</div></div>))}</div>
-        <div className="bg-white border rounded-2xl p-4 shadow-sm"><h2 className="font-bold text-[13px] mb-3">📋 تاریخ - {entries.length}</h2><div className="overflow-auto"><table className="w-full text-[11px]"><thead className="bg-gray-100"><tr><th className="p-2 text-right">تاریخ</th><th className="p-2 text-right">میٹریل</th><th className="p-2">تخمینہ</th><th className="p-2">اصل</th><th className="p-2">قیمت</th><th className="p-2">فی ریڑھی</th><th className="p-2">حالت</th><th className="p-2">عمل</th></tr></thead><tbody>{entries.map((en) => (<tr key={en.localId} className="border-t"><td className="p-2">{en.date.slice(0, 10)}</td><td className="p-2 font-bold">{en.material}</td><td className="p-2">{FROZEN_RAIRI}</td><td className="p-2 font-bold text-blue-600">{en.actualRairi ?? "-"}</td><td className="p-2">{en.trolleyPrice}</td><td className="p-2 font-bold text-green-700">{Number(en.perRairiRate || 0).toFixed(2)}</td><td className="p-2">{en.status === "OPEN" ? "🟡 OPEN" : "✅ CLOSED"}</td><td className="p-2">{en.status === "OPEN" ? (closeLocalId === en.localId ? (<div className="flex gap-1"><input type="number" value={actualRairi || ""} onChange={(ev) => setActualRairi(Number(ev.target.value))} className="w-20 border p-1 rounded text-[10px]" placeholder="اصل ریڑھی 55" /><button onClick={() => void handleClose(en.localId)} className="bg-black text-white px-2 py-1 rounded text-[9px]">بند</button><button onClick={() => setCloseLocalId(null)} className="border px-2 py-1 rounded text-[9px]">✕</button></div>) : (<button onClick={() => { setCloseLocalId(en.localId); setActualRairi(FROZEN_RAIRI); }} className="bg-blue-600 text-white px-2 py-1 rounded text-[9px]">Close اصل</button>)) : ("OK")}</td></tr>))}</tbody></table></div></div>
+        <div className="bg-white border rounded-2xl p-4 shadow-sm"><h2 className="font-bold text-[13px] mb-3">📋 تاریخ - {entries.length}</h2><div className="overflow-auto"><table className="w-full text-[11px]"><thead className="bg-gray-100"><tr><th className="p-2 text-right">تاریخ</th><th className="p-2 text-right">میٹریل</th><th className="p-2">تخمینہ</th><th className="p-2">اصل</th><th className="p-2">قیمت</th><th className="p-2">فی ریڑھی</th><th className="p-2">حالت</th><th className="p-2">عمل</th></tr></thead><tbody>{entries.map((en) => (<tr key={en.localId} className="border-t"><td className="p-2">{en.date.slice(0, 10)}</td><td className="p-2 font-bold">{en.material}</td><td className="p-2">{FROZEN_RAIRI}</td><td className="p-2 font-bold text-blue-600">{en.actualRairi ?? "-"}</td><td className="p-2">{en.trolleyPrice}</td><td className="p-2 font-bold text-green-700">{Number(en.perRairiRate || 0).toFixed(2)}</td><td className="p-2">{en.status === "OPEN" ? "🟡 OPEN" : "✅ CLOSED"}</td><td className="p-2">
+          {en.status === "OPEN" ? (
+            closeLocalId === en.localId ? (
+              <div className="flex gap-1 flex-wrap">
+                <input type="number" value={actualRairi || ""} onChange={(ev) => setActualRairi(Number(ev.target.value))} className="w-16 border p-1 rounded text-[10px]" placeholder="اصل 55" />
+                <button onClick={() => void handleClose(en.localId)} className="bg-black text-white px-2 py-1 rounded text-[9px]">بند</button>
+                <button onClick={() => setCloseLocalId(null)} className="border px-2 py-1 rounded text-[9px]">✕</button>
+              </div>
+            ) : (
+              <div className="flex gap-1 flex-wrap">
+                <button onClick={() => { setCloseLocalId(en.localId); setActualRairi(FROZEN_RAIRI); }} className="bg-blue-600 text-white px-2 py-1 rounded text-[9px]">Close</button>
+                <button onClick={() => void handleEdit(en)} className="bg-yellow-500 text-white px-2 py-1 rounded text-[9px]">ترمیم</button>
+                <button onClick={() => void handleDelete(en)} className="bg-red-600 text-white px-2 py-1 rounded text-[9px]">حذف</button>
+              </div>
+            )
+          ) : ("OK")}
+        </td></tr>))}</tbody></table></div></div>
       </div>
     </div>
   );
