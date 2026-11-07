@@ -228,7 +228,7 @@ export default function MonthlyExpensePage() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-2 sm:py-4" dir="rtl">
-      <div className="max-w-[760px] mx-auto px-2 sm:px-3 space-y-3 sm:space-y-4">
+      <div className="max-w-190 mx-auto px-2 sm:px-3 space-y-3 sm:space-y-4">
         <div className="bg-white border rounded-xl sm:rounded-2xl p-3 sm:p-6 shadow-sm">
           <h1 className="font-bold text-[13px] sm:text-[16px]">💡 ماہانہ خرچہ - Group 2 Rairi 60/55 Lock</h1>
           <p className="text-[10px] sm:text-[11px] text-gray-500 mt-1">مکس خرچ (ریڑھی حساب) روزانہ پیداوار سے خود آئے گا - ٹرالی 60 ریڑھی</p>

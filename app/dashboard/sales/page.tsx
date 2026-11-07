@@ -333,7 +333,7 @@ export default function SalesPage() {
           <div className="bg-white border border-t-0 rounded-b-xl rounded-t-none p-3 mt-0">
             <div className="flex justify-between items-center mb-2">
               <h2 className="font-bold text-[11px]">📋 فروخت تاریخ ({pagination.totalCount})</h2>
-              <input type="date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value); setPage(1);}} className="border p-1.5 rounded-lg text-[10px] bg-yellow-50 font-bold w-[130px]" />
+              <input type="date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value); setPage(1);}} className="border p-1.5 rounded-lg text-[10px] bg-yellow-50 font-bold w-32.5" />
             </div>
             <div className="flex gap-1 mb-2">
               {(["today","weekly","monthly","all"] as FilterType[]).map(f=>(
