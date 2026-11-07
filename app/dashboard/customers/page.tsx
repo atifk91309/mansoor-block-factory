@@ -190,10 +190,10 @@ export default function CustomersPage() {
 
   return (
     <div className="p-2 sm:p-3 md:p-4 max-w-2xl mx-auto min-h-screen bg-gray-50">
-      {/* ✅ BRANDING FIX: Mansoor Block Factory */}
+      {/* ✅ BRANDING FIX: Mahal Building Material */}
       <div className="bg-white rounded-xl p-3 mb-2 flex justify-between items-center shadow-sm border">
         <div className="min-w-0">
-          <h1 className="font-bold text-[14px] leading-tight truncate">🧱 Mansoor Block Factory - Khata</h1>
+          <h1 className="font-bold text-[14px] leading-tight truncate">🧱 Mahal Building Material - Khata</h1>
           <p className="text-[10px] text-gray-500">{pendingCount} pending • {paidCount} paid • {customers.length} customers</p>
         </div>
         <span className="font-bold text-red-600 text-[13px] whitespace-nowrap ml-2">Rs {fmt(totalUdhar)}</span>

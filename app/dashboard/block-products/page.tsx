@@ -27,7 +27,7 @@ const PRESET_GROUPS = [
   { label: "کرش / بجری - ٹرالی", category: "crush" as BlockCategory, unit: "trolley" as StockUnit, items: [
     { name: "پن کرش", buy: 13000, sell: 17000 },
     { name: "ترکے کرش", buy: 15000, sell: 20000 },
-    { name: "منیرے کرش", buy: 10000, sell: 14000 },
+    { name: "مانیرے کرش", buy: 10000, sell: 14000 },
     { name: "بجری", buy: 12000, sell: 16000 },
   ]},
   { label: "بلاک - فی بلاک", category: "block" as BlockCategory, unit: "block" as StockUnit, items: [

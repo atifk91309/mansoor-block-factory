@@ -93,13 +93,13 @@ function LoginContent() {
       <div className="w-full max-w-90">
         <div className="text-center mb-6">
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-white border-2 border-[#0f4fb8] shadow-md overflow-hidden">
-            <Image src="/icon-circle-512.png" alt="Mansoor Block Factory - MOHAL" width={56} height={56} className="h-12 w-12 object-contain" priority />
+            <Image src="/icon-circle-512.png" alt="Mahal Block Material - محل بلاک مٹیریل - MAHAL" width={56} height={56} className="h-12 w-12 object-contain" priority />
           </div>
           <h1 className="mt-3 text-[20px] font-bold tracking-tight text-gray-900 leading-tight">
-            🧱 MOHAL Block Factory
+            🧱 MAHAL - Mahal Block Material
           </h1>
-          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">منصور بلاک فیکٹری - محل</p>
-          <p className="text-[12px] font-medium text-gray-600 mt-0.5">Blocks • Crush • Rait • Cement • Shewa Road</p>
+          <p className="text-[13px] font-bold text-[#0f4fb8] mt-0.5">محل بلاک مٹیریل</p>
+          <p className="text-[12px] font-medium text-gray-600 mt-0.5">Blocks • Crush • Rait • Cement • Ismaila</p>
           <p className="text-[11px] text-gray-400 mt-1">Daily Production • Sales • Stock • Profit • Khata • Offline</p>
         </div>
 
@@ -113,7 +113,7 @@ function LoginContent() {
           <div className="space-y-3">
             <div>
               <label className="text-[11px] font-semibold tracking-widest text-gray-500 uppercase ml-1">Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="mansoor@block.com" type="email" required autoComplete="email" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition" />
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="mahal@block.com" type="email" required autoComplete="email" className="mt-1.5 w-full border border-gray-200 bg-gray-50/50 p-3.5 rounded-xl text-[14px] outline-none focus:bg-white focus:border-[#0f4fb8] focus:ring-4 focus:ring-[#0f4fb8]/10 transition" />
             </div>
             <div>
               <label className="text-[11px] font-semibold tracking-widest text-gray-500 uppercase ml-1">Password</label>
@@ -125,10 +125,10 @@ function LoginContent() {
           {error && <div className="bg-red-50 border border-red-100 text-red-600 text-[13px] p-3 rounded-xl text-center font-medium">{error}</div>}
 
           <button type="submit" disabled={loading} className="w-full bg-[#0f4fb8] hover:bg-[#0d3f99] text-white p-3.5 rounded-xl font-bold text-[14px] disabled:opacity-60 active:scale-[0.98] transition shadow-[0_6px_20px_rgba(15,79,184,0.3)]">
-            {loading ? "Logging in..." : isOffline ? "Login Offline - MOHAL" : "Login to MOHAL Blocks"}
+            {loading ? "Logging in..." : isOffline ? "Login Offline - MAHAL" : "Login to MAHAL Blocks"}
           </button>
 
-          <p className="text-center text-[11px] text-gray-400 pt-1">{isOffline ? "Offline mode • 1 year cache • 8386 Blocks" : "Secure • MOHAL Blocks • منصور بلاک فیکٹری • Works offline • Shewa Road"}</p>
+          <p className="text-center text-[11px] text-gray-400 pt-1">{isOffline ? "Offline mode • 1 year cache • 8386 Blocks" : "Secure • MAHAL Blocks • محل بلاک مٹیریل • Works offline • Shewa"}</p>
         </form>
       </div>
     </div>

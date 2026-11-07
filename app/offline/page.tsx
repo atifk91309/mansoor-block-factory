@@ -7,13 +7,13 @@ export default function OfflinePage() {
       <Image 
         src="/icon-circle-512.png" 
         unoptimized 
-        alt="Mansoor Block Factory - MOHAL" 
+        alt="Mahal Block Material - محل بلاک مٹیریل - MOHAL" 
         width={80} 
         height={80} 
         className="w-20 h-20 rounded-full border-2 border-[#0f4fb8] mb-4 bg-white" 
       />
-      <h1 className="text-xl font-bold">🧱 Mansoor Block Factory</h1>
-      <p className="text-[#0f4fb8] text-sm font-bold">منصور بلاک فیکٹری - محل</p>
+      <h1 className="text-xl font-bold">🧱 Mahal Block Material</h1>
+      <p className="text-[#0f4fb8] text-sm font-bold">محل بلاک مٹیریل</p>
       <p className="text-gray-600 text-sm font-medium">Blocks • Crush • Rait • Cement • Ismaila</p>
       <p className="text-gray-500 text-[12px] mt-3 font-bold">You are offline. Your data is safe.</p>
       <p className="text-[11px] text-gray-400 mt-1">Daily Production, Sales, Stock & Khata work offline • Auto-sync when online</p>
@@ -27,7 +27,7 @@ export default function OfflinePage() {
       </div>
       
       <p className="text-[10px] text-gray-400 mt-6">
-        Mansoor Block Factory - MOHAL • Offline V3 • منصور بلاک فیکٹری • Ismaila, Swabi • No Play Protect Warning
+        Mahal Block Material - MOHAL • Offline V4 • محل بلاک مٹیریل • Ismaila, Swabi • No Play Protect Warning
       </p>
     </div>
   );

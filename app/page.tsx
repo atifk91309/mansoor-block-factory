@@ -55,8 +55,8 @@ export default function HomePage() {
     <div className="min-h-dvh bg-gray-50 flex flex-col">
       <div className="bg-white border-b px-3 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-10">
         <div className="flex items-center gap-2">
-          <Image src="/icon-circle-512.png" alt="Mansoor Block Factory" width={28} height={28} className="w-7 h-7 rounded-full border bg-white" />
-          <h1 className="font-bold text-[14px]">🧱 MOHAL - Mansoor Block</h1>
+          <Image src="/icon-circle-512.png" alt="Mahal Block Material - محل بلاک مٹیریل" width={28} height={28} className="w-7 h-7 rounded-full border bg-white" />
+          <h1 className="font-bold text-[14px]">🧱 MOHAL - Mahal Block</h1>
         </div>
         <div className="flex gap-2">
           {!isInstalled && (
@@ -73,14 +73,14 @@ export default function HomePage() {
       <div className="flex-1 p-3 sm:p-8 max-w-6xl mx-auto w-full flex flex-col justify-center">
         <div className="text-center mb-5">
           <div className="flex justify-center mb-3">
-            <Image src="/icon-circle-512.png" alt="Mansoor Block Factory - Mohal" width={80} height={80} className="w-20 h-20 rounded-full border-2 border-[#0f4fb8] shadow-sm bg-white" priority />
+            <Image src="/icon-circle-512.png" alt="Mahal Block Material - محل بلاک مٹیریل" width={80} height={80} className="w-20 h-20 rounded-full border-2 border-[#0f4fb8] shadow-sm bg-white" priority />
           </div>
           <h1 className="text-[22px] sm:text-4xl font-bold leading-tight">
-            Mansoor Block
+            Mahal Block
             <br />
-            <span className="text-[#0f4fb8]">Factory - MOHAL</span>
+            <span className="text-[#0f4fb8]">Material - MOHAL</span>
           </h1>
-          <p className="text-gray-600 text-[13px] mt-2 font-bold">منصور بلاک فیکٹری - محل</p>
+          <p className="text-gray-600 text-[13px] mt-2 font-bold">محل بلاک مٹیریل</p>
           <p className="text-gray-500 text-[12px] mt-1 font-medium">Blocks • Crush • Rait • Cement • Shewa</p>
           <p className="text-gray-400 text-[11px] mt-1">Daily Production • Fast billing • Stock • Profit • Udhar Khata • Offline-ready</p>
 
@@ -119,7 +119,7 @@ export default function HomePage() {
           </Link>
           <Link href="/dashboard/customers" className="bg-orange-50 border border-orange-200 p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
             <p className="font-bold text-[13px] mt-1">📒 Khata / Udhar</p>
-            <p className="text-[11px] text-gray-500 mt-1">Customers - Shewa, Marghuz</p>
+            <p className="text-[11px] text-gray-500 mt-1">Customers - Mahal Block Material</p>
           </Link>
           <Link href="/dashboard/sales/history" className="bg-white border p-3.5 rounded-[18px] shadow-sm hover:shadow-md transition">
             <p className="font-bold text-[13px] mt-1">📜 History</p>
@@ -129,7 +129,7 @@ export default function HomePage() {
       </div>
 
       <div className="text-center pb-4 text-[10px] text-gray-400">
-        Mansoor Block Factory - MOHAL © {new Date().getFullYear()} • منصور بلاک فیکٹری • Offline V3 • Ismaila, Swabi • No Play Protect Warning
+        Mahal Block Material - MOHAL © {new Date().getFullYear()} • محل بلاک مٹیریل • Offline V4 • Ismaila, Swabi • No Play Protect Warning
       </div>
     </div>
   );

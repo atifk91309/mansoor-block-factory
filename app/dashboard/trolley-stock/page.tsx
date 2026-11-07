@@ -262,7 +262,7 @@ export default function TrolleyStockPage() {
               <label className="text-[11px] font-bold">میٹریل *</label>
               <input value={material} onChange={(e) => setMaterial(e.target.value)} className="w-full border p-3 rounded-xl mt-1 text-[13px]" />
               <div className="flex gap-1 mt-2 flex-wrap">
-                {["پن کرش", "ترکے کرش", "منیرے کرش", "گھٹہ شگہ", "بجری", "ریت"].map((m) => (
+                {["پن کرش", "ترکے کرش", "مانیرے کرش", "گھٹہ شگہ", "بجری", "ریت"].map((m) => (
                   <button key={m} onClick={() => setMaterial(m)} className={`px-2 py-1 rounded-lg text-[10px] border font-bold ${material === m ? "bg-black text-white" : "bg-gray-100"}`}>{m}</button>
                 ))}
               </div>

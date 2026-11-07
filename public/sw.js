@@ -1,4 +1,4 @@
-const CACHE = 'mohal-block-v3';
+const CACHE = 'mohal-block-v4';
 
 const PRECACHE = [
   '/',
@@ -92,7 +92,7 @@ self.addEventListener('fetch', (e) => {
                  (await cache.match('/login')) ||
                  (await cache.match('/')) ||
                  new Response(
-                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/icon-circle-512.png" style="width:80px;height:80px;border-radius:50%"/><h1>منصور بلاک فیکٹری - MOHAL</h1><p>Mansoor Block Factory - Mohal - Offline</p><p>Blocks • Crush • Rait • Cement • Daily Production billing available offline • Ismaila, Swabi</p><a href="/login" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#0f4fb8;color:#fff;border-radius:8px;text-decoration:none">Login</a></body></html>`,
+                   `<html><body style="font-family:system-ui;text-align:center;padding:40px"><img src="/icon-circle-512.png" style="width:80px;height:80px;border-radius:50%"/><h1>محل بلاک مٹیریل - MOHAL</h1><p>Mahal Block Material - Mohal - Offline</p><p>Blocks • Crush • Rait • Cement • Daily Production billing available offline • Ismaila, Swabi</p><a href="/login" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#0f4fb8;color:#fff;border-radius:8px;text-decoration:none">Login</a></body></html>`,
                    { headers: { 'Content-Type': 'text/html' } }
                  );
         })

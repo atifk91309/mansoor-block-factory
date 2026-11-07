@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Mansoor Block Factory - منصور بلاک فیکٹری - MOHAL",
+  "name": "Mahal Block Material - محل بلاک مٹیریل - MOHAL",
   "short_name": "MOHAL Blocks",
-  "description": "Mansoor Block Factory - Mohal - Blocks, Crush, Rait, Cement, Daily Production, Sales, Khata, Udhar, Profit tracking - Offline PWA - Ismaila, Swabi",
+  "description": "Mahal Block Material - محل بلاک مٹیریل - Blocks, Crush, Rait, Cement, Daily Production, Sales, Khata, Udhar, Profit tracking - Offline PWA - Ismaila, Swabi",
   "start_url": "/login?utm_source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -54,7 +54,7 @@
     {
       "name": "📒 Khata / Udhar",
       "url": "/dashboard/customers",
-      "description": "Customer Khata - Ismaila, Marghuz",
+      "description": "Customer Khata - Mahal Block Material",
       "icons": [{ "src": "/icon-circle-192.png", "sizes": "192x192" }]
     },
     {

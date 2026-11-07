@@ -228,7 +228,7 @@ export default function MansoorBlockDashboard() {
 
       <div className="flex justify-between items-start gap-3 mb-2">
         <div>
-          <h1 className="text-[20px] font-bold">🧱 منصور بلاک فیکٹری - شیوہ روڈ</h1>
+          <h1 className="text-[20px] font-bold">🧱 محل بلاک مٹیریل - شیوہ روڈ</h1>
           <p className="text-[11px] text-gray-500">{new Date().toLocaleDateString("ur-PK")} • {isOffline ? "آف لائن" : "آن لائن"} • {reports?.production.all.totalBlocks || 0} بلاک کل پیداوار • فی ریڑھی 1200 روپے</p>
         </div>
         <BackupRestore />

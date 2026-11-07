@@ -17,12 +17,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Mansoor Block Factory - MOHAL - Blocks, Crush, Rait - Ismaila",
-    template: "%s | MOHAL Block Factory",
+    default: "Mahal Block Material - محل بلاک مٹیریل - MOHAL - Blocks, Crush, Rait - Ismaila",
+    template: "%s | MOHAL - Mahal Block Material",
   },
   description:
-    "Mansoor Block Factory - Mohal - Blocks, Crush, Rait, Cement. Daily Production, Sales, Stock, Profit, Udhar Khata, Yearly Reports. Offline-ready PWA - Ismaila, Swabi.",
-  applicationName: "MOHAL - Mansoor Block Factory",
+    "Mahal Block Material - محل بلاک مٹیریل - MOHAL - Blocks, Crush, Rait, Cement. Daily Production, Sales, Stock, Profit, Udhar Khata, Yearly Reports. Offline-ready PWA - Ismaila, Swabi.",
+  applicationName: "MOHAL - Mahal Block Material",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
     shortcut: ["/icon-circle-512.png"],
   },
   openGraph: {
-    title: "Mansoor Block Factory - منصور بلاک فیکٹری - MOHAL - Ismaila",
+    title: "Mahal Block Material - محل بلاک مٹیریل - MOHAL - Ismaila",
     description: "Blocks • Crush • Rait • Cement • Daily Production 78 Bori • Yearly 8386 Blocks • Offline Ready • No Play Store",
     type: "website",
     images: ["/icon-circle-512.png"],

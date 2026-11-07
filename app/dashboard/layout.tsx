@@ -117,7 +117,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       <aside className={`w-64 bg-zinc-900 text-white p-5 flex flex-col z-40 fixed md:sticky top-0 left-0 h-dvh shrink-0 transition-transform ${open ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
         <div className="md:hidden h-14 shrink-0" />
         <div className="mb-4 text-left" dir="rtl">
-          <h2 className="font-bold text-[16px]">🧱 منصور بلاک فیکٹری</h2>
+          <h2 className="font-bold text-[16px]">🧱 محل بلاک مٹیریل</h2>
           <p className="text-[10px] text-zinc-400">شیوہ روڈ • صوابی • Frozen 60 ریڑھی = 13000 ÷ 60 = 216.67 روپے</p>
         </div>
 

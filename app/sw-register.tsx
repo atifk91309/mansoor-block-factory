@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 
-const CURRENT_CACHE = "mohal-block-v3";
+const CURRENT_CACHE = "mohal-block-v4";
 
 export default function SWRegister() {
   useEffect(() => {
@@ -31,16 +31,16 @@ export default function SWRegister() {
 
     const onLoad = () => {
       navigator.serviceWorker
-        .register("/sw.js?v=mohal-v3", { scope: "/" })
+        .register("/sw.js?v=mohal-v4", { scope: "/" })
         .then((reg) => {
-          console.log("SW MOHAL Block Factory v3:", reg.scope);
+          console.log("SW MOHAL Block Material v4:", reg.scope);
 
           reg.addEventListener("updatefound", () => {
             const nw = reg.installing;
             if (!nw) return;
             nw.addEventListener("statechange", () => {
               if (nw.state === "installed" && navigator.serviceWorker.controller) {
-                console.log("New MOHAL SW v3 ready - reloading");
+                console.log("New MOHAL SW v4 ready - reloading");
                 window.location.reload();
               }
             });

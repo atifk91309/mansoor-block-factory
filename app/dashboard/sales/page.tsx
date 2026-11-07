@@ -258,7 +258,7 @@ export default function SalesPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-2 sm:p-4 max-w-7xl mx-auto" dir="rtl">
       <div className="flex flex-wrap justify-between gap-2 mb-3">
-        <h1 className="font-bold text-[16px]">🧱 منصور بلاک فیکٹری - فروخت - No Rairi - trolley/tumper/bori {isOffline ? "📶 آف لائن" : ""} {isProcessing ? "⏳ جاری ہے..." : ""}</h1>
+        <h1 className="font-bold text-[16px]">🧱 محل بلاک مٹیریل - فروخت - No Rairi - trolley/tumper/bori {isOffline ? "📶 آف لائن" : ""} {isProcessing ? "⏳ جاری ہے..." : ""}</h1>
         <div className="flex gap-2">
           <span className="bg-green-600 text-white px-3 py-1 rounded-full text-[11px]">فروخت {fmt(total)} روپے</span>
           <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[11px]">منافع {fmt(profit)} روپے</span>
